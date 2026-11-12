@@ -105,9 +105,9 @@ class Settings(context: Context) {
     // Offline neural voice
     var voiceEngine by mutableStateOf(sp.getString("voice_engine", "neural") ?: "neural")
         private set
-    var voiceModelId by mutableStateOf(sp.getString("voice_model", "kitten-nano") ?: "kitten-nano")
+    var voiceModelId by mutableStateOf(sp.getString("voice_model", "supertonic") ?: "supertonic")
         private set
-    var voiceSid by mutableIntStateOf(sp.getInt("voice_sid", 3))
+    var voiceSid by mutableIntStateOf(sp.getInt("voice_sid", 0))
         private set
     var voiceSpeed by mutableStateOf(sp.getFloat("voice_speed", 1.0f))
         private set

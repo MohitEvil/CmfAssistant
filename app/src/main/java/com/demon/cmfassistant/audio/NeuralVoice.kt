@@ -60,6 +60,23 @@ class NeuralVoice(private val context: Context) {
     var speaking = false
         private set
 
+    /** Written before loading and cleared after the first synthesis. If it's still there on the next start, the app was killed by the engine. */
+    private val marker = File(context.filesDir, "voice-loading.marker")
+
+    /** Returns the id of a voice that was loading or synthesizing when the app last died, and clears the marker. */
+    fun takeCrashMarker(): String? {
+        if (!marker.exists()) return null
+        val id = runCatching { marker.readText().trim() }.getOrDefault("")
+        marker.delete()
+        return id.ifBlank { null }
+    }
+
+    /** Puts the voice into an error state without loading it. */
+    fun fail(message: String) {
+        error = message
+        phase = Phase.ERROR
+    }
+
     private val main = Handler(Looper.getMainLooper())
     private val loader = Executors.newSingleThreadExecutor()
     private val synth = Executors.newSingleThreadExecutor()
@@ -94,6 +111,7 @@ class NeuralVoice(private val context: Context) {
         loader.execute {
             try {
                 if (!libraryPresent) throw IllegalStateException("The neural engine isn't included in this build.")
+                runCatching { marker.writeText(model.id) }
                 val (tts, sr) = build(model, dir)
                 val old: Any?
                 synchronized(lock) {
@@ -111,6 +129,7 @@ class NeuralVoice(private val context: Context) {
                 }
             } catch (t: Throwable) {
                 val root = if (t is InvocationTargetException) t.cause ?: t else t
+                marker.delete()
                 AppLog.e("neural", "load FAILED for ${model.id}", root)
                 main.post {
                     phase = Phase.ERROR
@@ -420,6 +439,8 @@ class NeuralVoice(private val context: Context) {
             }
         } catch (e: InvocationTargetException) {
             throw e.cause ?: e
+        } finally {
+            marker.delete() // reached only if the engine didn't kill the app
         }
     }
 

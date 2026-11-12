@@ -55,43 +55,8 @@ object VoiceCatalog {
 
     private val kittenVoices = (1..8).map { "Voice $it" to (it - 1) }
 
+    // Kitten voices were removed: sherpa-onnx 2.x dropped its built-in phonemizer for Kitten, so they stay silent.
     val all = listOf(
-        VoiceModel(
-            id = "kitten-nano",
-            name = "KITTEN NANO",
-            blurb = "Tiny and very fast. Natural, expressive English voices. Best for instant replies.",
-            sizeLabel = "small",
-            url = BASE + "kitten-nano-en-v0_8-int8.tar.bz2",
-            folder = "kitten-nano-en-v0_8-int8",
-            kind = "kitten",
-            modelFile = "",
-            voices = kittenVoices,
-            defaultSid = 3
-        ),
-        VoiceModel(
-            id = "kitten-micro",
-            name = "KITTEN MICRO",
-            blurb = "A step up from Nano with smoother speech. Still quick on most phones.",
-            sizeLabel = "medium",
-            url = BASE + "kitten-micro-en-v0_8.tar.bz2",
-            folder = "kitten-micro-en-v0_8",
-            kind = "kitten",
-            modelFile = "",
-            voices = kittenVoices,
-            defaultSid = 3
-        ),
-        VoiceModel(
-            id = "kitten-mini",
-            name = "KITTEN MINI",
-            blurb = "The biggest Kitten, with the richest and smoothest speech.",
-            sizeLabel = "medium",
-            url = BASE + "kitten-mini-en-v0_8.tar.bz2",
-            folder = "kitten-mini-en-v0_8",
-            kind = "kitten",
-            modelFile = "",
-            voices = kittenVoices,
-            defaultSid = 3
-        ),
         VoiceModel(
             id = "kokoro",
             name = "KOKORO",

@@ -23,7 +23,7 @@ Or in Android Studio: open the folder and press Run.
 - **Test connection** button under AI Chat shows the exact reason if the AI can't be reached (bad key, wrong model, no internet).
 - Command confirmations are now varied and natural instead of echoing what you said.
 
-- **Offline neural voice** (Settings > Voice). Download a voice once (Kitten Nano is tiny and fast, Kitten Mini is richer, Kokoro is the most natural but about 330 MB) and it works with no internet afterwards. It replaces the stock Android voice for English. Pick the speaker and speed there. Devanagari Hindi still uses the phone voice.
+- **Offline neural voice** (Settings > Voice). Download a voice once (Supertonic is fast, Kokoro is the most natural but about 330 MB; Kitten was removed because the current engine can't speak it) and it works with no internet afterwards. It replaces the stock Android voice for English. Pick the speaker and speed there. Devanagari Hindi still uses the phone voice.
 - **More voices** (Settings > Voice): Supertonic 3 (10 voices, fast), Matcha + Vocos (single English voice) and MeloTTS (Chinese + English) join Kitten and Kokoro, all through sherpa-onnx.
   - **Zani (your voice):** Kyutai Pocket TTS cloning the 20 sample clips you gave. Each style (polite, warm, wry, heroic...) is a speaker; the model takes one ~12 s reference at a time, so styles are switchable rather than blended.
   - **Not included:**  "Phonon 31M" is by Gradium (not Google) and ships as a GGUF for Gradium's own Rust runtime, not MediaPipe/LiteRT, so there is no way to run it in this app today.
