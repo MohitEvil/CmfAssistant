@@ -199,7 +199,7 @@ fun VoiceScreen(
             Spacer(Modifier.height(24.dp))
             SectionLabel("SPEED", palette)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                listOf("RELAXED" to 0.9f, "NORMAL" to 1.0f, "QUICK" to 1.15f).forEach { (name, v) ->
+                listOf("RELAXED" to 1.0f, "NORMAL" to 1.15f, "QUICK" to 1.3f, "TURBO" to 1.5f).forEach { (name, v) ->
                     Chip(name, settings.voiceSpeed == v, palette) {
                         settings.setVoiceSpeed(v)
                         voice.speak("Hey, this is my speed.") {}

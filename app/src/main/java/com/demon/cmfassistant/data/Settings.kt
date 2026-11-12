@@ -114,7 +114,7 @@ class Settings(context: Context) {
         private set
     var voiceSid by mutableIntStateOf(sp.getInt("voice_sid", 0))
         private set
-    var voiceSpeed by mutableStateOf(sp.getFloat("voice_speed", 1.0f))
+    var voiceSpeed by mutableStateOf(sp.getFloat("voice_speed", 1.15f))
         private set
 
     // AI thinking mode (off = faster replies)

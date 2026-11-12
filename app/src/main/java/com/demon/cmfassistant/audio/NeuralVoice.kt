@@ -185,7 +185,8 @@ class NeuralVoice(private val context: Context) {
                 t.play()
                 val written = AtomicLong(0)
                 if (cached != null) {
-                    t.write(cached, 0, cached.size, AudioTrack.WRITE_BLOCKING)
+                    val loud = boost(cached)
+                    t.write(loud, 0, loud.size, AudioTrack.WRITE_BLOCKING)
                     written.set(cached.size.toLong())
                 } else {
                     val keep = if (text.length <= CACHE_MAX_CHARS) ArrayList<FloatArray>() else null
@@ -195,7 +196,8 @@ class NeuralVoice(private val context: Context) {
                             if (gen.get() != myGen) {
                                 0
                             } else {
-                                tr.write(samples, 0, samples.size, AudioTrack.WRITE_BLOCKING)
+                                val loud = boost(samples)
+                                tr.write(loud, 0, loud.size, AudioTrack.WRITE_BLOCKING)
                                 written.addAndGet(samples.size.toLong())
                                 keep?.add(samples)
                                 1
@@ -373,6 +375,17 @@ class NeuralVoice(private val context: Context) {
         return tts to sr
     }
 
+    /** Makes the voice louder: a gain with a soft limiter so peaks round off instead of crackling. */
+    private fun boost(x: FloatArray): FloatArray {
+        val out = FloatArray(x.size)
+        for (i in x.indices) {
+            val v = x[i] * GAIN
+            val a = Math.abs(v)
+            out[i] = if (a < 0.7f) v else Math.signum(v) * (0.7f + 0.3f * Math.tanh(((a - 0.7f) / 0.3f).toDouble()).toFloat())
+        }
+        return out
+    }
+
     private val refCache = HashMap<Int, Pair<FloatArray, Int>>()
 
     /** Decodes the bundled 16-bit mono reference clip for a Zani style (cached in memory). */
@@ -416,7 +429,7 @@ class NeuralVoice(private val context: Context) {
             if (withConfig != null) {
                 val g = bean("GenerationConfig")
                 trySet(g, "sid", sid)
-                trySet(g, "speed", speed)
+                trySet(g, "speed", if (kind == "pocket") speed * 1.1f else speed)
                 trySet(g, "silenceScale", 0.15f)
                 if (kind == "pocket") {
                     val (samples, ref) = referenceFor(sid)
@@ -539,6 +552,7 @@ class NeuralVoice(private val context: Context) {
     }
 
     companion object {
+        const val GAIN = 1.9f
         private const val PKG = "com.k2fsa.sherpa.onnx."
         private const val CACHE_MAX_CHARS = 90
     }
