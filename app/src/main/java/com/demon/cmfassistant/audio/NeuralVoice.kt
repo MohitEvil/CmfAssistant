@@ -183,6 +183,7 @@ class NeuralVoice(private val context: Context) {
                             }
                         }
                     }
+                    if (gen.get() == myGen && written.get() == 0L) throw IllegalStateException("The voice produced no audio for this text.")
                     if (keep != null && gen.get() == myGen && keep.isNotEmpty()) writeCache(key, merge(keep))
                 }
                 // Wait for the speaker to finish what was queued.
@@ -243,7 +244,11 @@ class NeuralVoice(private val context: Context) {
                     AppLog.e("neural", "prewarm FAILED on '${p.take(30)}'", e)
                     return@execute
                 }
-                if (out.isNotEmpty()) writeCache(key, merge(out))
+                if (out.isEmpty()) {
+                    AppLog.e("neural", "prewarm stopped: the voice produced no audio for '${p.take(30)}'")
+                    return@execute
+                }
+                writeCache(key, merge(out))
             }
         }
     }
@@ -257,7 +262,8 @@ class NeuralVoice(private val context: Context) {
             val f = File(root, it)
             AppLog.d("neural", "  $it  " + if (!f.exists()) "MISSING" else if (f.isDirectory) "dir" else "${f.length() / 1024} KB")
         }
-        val missing = model.requiredFiles().firstOrNull { !File(root, it).exists() }
+        AppLog.d("neural", "folder contains: " + (root.listFiles()?.joinToString { it.name + (if (it.isFile) " ${it.length() / 1024}KB" else "/") } ?: "nothing"))
+        val missing = (if (model.resolveModel(root) == null) "model .onnx file" else null) ?: model.requiredFiles().firstOrNull { !File(root, it).exists() }
         if (missing != null) throw IllegalStateException("The voice files are incomplete ($missing). Delete the voice and download it again.")
         fun path(name: String) = File(root, name).absolutePath
 
@@ -313,10 +319,16 @@ class NeuralVoice(private val context: Context) {
             }
             else -> {
                 val k = bean("OfflineTtsKittenModelConfig")
-                set(k, "model", path(model.modelFile))
+                val onnx = model.resolveModel(root)!!
+                set(k, "model", onnx.absolutePath)
                 set(k, "voices", path("voices.bin"))
                 set(k, "tokens", path("tokens.txt"))
-                set(k, "dataDir", path("espeak-ng-data"))
+                if (File(root, "espeak-ng-data").isDirectory) set(k, "dataDir", path("espeak-ng-data"))
+                val lex = model.findLexicon(root)
+                if (lex != null) {
+                    AppLog.d("neural", "using lexicon ${lex.name}")
+                    set(k, "lexicon", lex.absolutePath)
+                }
                 set(modelCfg, "kitten", k)
             }
         }

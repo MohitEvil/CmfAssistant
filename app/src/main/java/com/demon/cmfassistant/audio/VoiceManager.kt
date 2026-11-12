@@ -42,7 +42,7 @@ class VoiceManager(context: Context) {
 
     /** Installed only if the download finished completely (marker file) and every required file is present. */
     fun isInstalled(model: VoiceModel) =
-        File(dirFor(model), ".complete").exists() && model.requiredFiles().all { File(dirFor(model), it).exists() }
+        File(dirFor(model), ".complete").exists() && model.resolveModel(dirFor(model)) != null && model.requiredFiles().all { File(dirFor(model), it).exists() }
 
     fun download(model: VoiceModel) {
         if (jobs[model.id]?.isActive == true) return
@@ -66,7 +66,7 @@ class VoiceManager(context: Context) {
                     tmp.copyTo(target, overwrite = true)
                     tmp.delete()
                 }
-                val missing = model.requiredFiles().filter { !File(dirFor(model), it).exists() }
+                val missing = (if (model.resolveModel(dirFor(model)) == null) listOf("model .onnx file") else emptyList<String>()) + model.requiredFiles().filter { !File(dirFor(model), it).exists() }
                 if (missing.isNotEmpty()) {
                     dirFor(model).deleteRecursively()
                     throw IOException("The download was incomplete (missing ${missing.first()}). Try again.")

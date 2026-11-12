@@ -34,8 +34,18 @@ fun VoiceModel.requiredFiles(): List<String> = when (kind) {
         "lm_flow.int8.onnx", "lm_main.int8.onnx", "encoder.onnx", "decoder.int8.onnx",
         "text_conditioner.onnx", "vocab.json", "token_scores.json"
     )
-    else -> listOf(modelFile, "voices.bin", "tokens.txt", "espeak-ng-data")
+    else -> listOfNotNull(modelFile.ifBlank { null }, "voices.bin", "tokens.txt") // newer Kitten voices may or may not ship espeak-ng-data
 } + extras.map { it.second }
+
+/** The model file: the named one, or (when no name is set) the first .onnx file in the folder. */
+fun VoiceModel.resolveModel(dir: java.io.File): java.io.File? {
+    if (modelFile.isNotBlank()) return java.io.File(dir, modelFile).takeIf { it.exists() }
+    return dir.listFiles()?.filter { it.isFile && it.name.endsWith(".onnx") }?.minByOrNull { it.name }
+}
+
+/** A pronunciation lexicon shipped with the voice, if any (newer Kitten voices need it). */
+fun VoiceModel.findLexicon(dir: java.io.File): java.io.File? =
+    dir.listFiles()?.filter { it.isFile && it.name.startsWith("lexicon") && it.name.endsWith(".txt") }?.minByOrNull { it.name }
 
 object VoiceCatalog {
     /** Reference clip file names (assets/voice_refs) in the same order as the Zani style speaker ids. */
@@ -43,12 +53,7 @@ object VoiceCatalog {
 
     private const val BASE = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/"
 
-    private val kittenVoices = listOf(
-        "Voice 2 (male)" to 0, "Voice 2 (female)" to 1,
-        "Voice 3 (male)" to 2, "Voice 3 (female)" to 3,
-        "Voice 4 (male)" to 4, "Voice 4 (female)" to 5,
-        "Voice 5 (male)" to 6, "Voice 5 (female)" to 7
-    )
+    private val kittenVoices = (1..8).map { "Voice $it" to (it - 1) }
 
     val all = listOf(
         VoiceModel(
@@ -56,22 +61,34 @@ object VoiceCatalog {
             name = "KITTEN NANO",
             blurb = "Tiny and very fast. Natural, expressive English voices. Best for instant replies.",
             sizeLabel = "small",
-            url = BASE + "kitten-nano-en-v0_1-fp16.tar.bz2",
-            folder = "kitten-nano-en-v0_1-fp16",
+            url = BASE + "kitten-nano-en-v0_8-int8.tar.bz2",
+            folder = "kitten-nano-en-v0_8-int8",
             kind = "kitten",
-            modelFile = "model.fp16.onnx",
+            modelFile = "",
+            voices = kittenVoices,
+            defaultSid = 3
+        ),
+        VoiceModel(
+            id = "kitten-micro",
+            name = "KITTEN MICRO",
+            blurb = "A step up from Nano with smoother speech. Still quick on most phones.",
+            sizeLabel = "medium",
+            url = BASE + "kitten-micro-en-v0_8.tar.bz2",
+            folder = "kitten-micro-en-v0_8",
+            kind = "kitten",
+            modelFile = "",
             voices = kittenVoices,
             defaultSid = 3
         ),
         VoiceModel(
             id = "kitten-mini",
             name = "KITTEN MINI",
-            blurb = "A bigger Kitten with richer, smoother speech. Still fast on most phones.",
+            blurb = "The biggest Kitten, with the richest and smoothest speech.",
             sizeLabel = "medium",
             url = BASE + "kitten-mini-en-v0_8.tar.bz2",
             folder = "kitten-mini-en-v0_8",
             kind = "kitten",
-            modelFile = "model.onnx",
+            modelFile = "",
             voices = kittenVoices,
             defaultSid = 3
         ),
