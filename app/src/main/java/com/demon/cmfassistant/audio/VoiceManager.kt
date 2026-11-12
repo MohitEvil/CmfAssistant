@@ -1,6 +1,7 @@
 package com.demon.cmfassistant.audio
 
 import android.content.Context
+import com.demon.cmfassistant.debug.AppLog
 import androidx.compose.runtime.mutableStateMapOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -48,11 +49,14 @@ class VoiceManager(context: Context) {
         jobs[model.id] = scope.launch {
             val part = File(root, model.id + ".part")
             try {
+                AppLog.d("download", "start ${model.id}: ${model.url}")
                 states[model.id] = InstallState(InstallPhase.DOWNLOADING, 0f)
                 val share = 1f / (1 + model.extras.size)
                 fetch(model.url, part, { ensureActive() }) { p -> states[model.id] = InstallState(InstallPhase.DOWNLOADING, p * share) }
+                AppLog.d("download", "archive downloaded: ${part.length() / 1024} KB, extracting")
                 states[model.id] = InstallState(InstallPhase.INSTALLING)
                 extract(part)
+                AppLog.d("download", "extracted into ${dirFor(model).path}")
                 part.delete()
                 model.extras.forEachIndexed { i, (url, name) ->
                     val target = File(dirFor(model), name)
@@ -68,6 +72,7 @@ class VoiceManager(context: Context) {
                     throw IOException("The download was incomplete (missing ${missing.first()}). Try again.")
                 }
                 File(dirFor(model), ".complete").writeText("ok")
+                AppLog.d("download", "${model.id} installed OK")
                 states[model.id] = InstallState(InstallPhase.INSTALLED)
                 onInstalled?.invoke(model)
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -78,6 +83,7 @@ class VoiceManager(context: Context) {
             } catch (e: Exception) {
                 part.delete()
                 File(root, model.id + ".extra").delete()
+                AppLog.e("download", "${model.id} failed", e)
                 states[model.id] = InstallState(InstallPhase.FAILED, message = friendly(e))
             }
         }
@@ -91,6 +97,7 @@ class VoiceManager(context: Context) {
         try {
             if (conn.responseCode !in 200..299) throw IOException("The server answered ${conn.responseCode}.")
             val total = conn.contentLengthLong
+            AppLog.d("download", "server answered ${conn.responseCode}, size ${total / 1024} KB")
             var done = 0L
             var lastReport = 0L
             conn.inputStream.use { input ->
@@ -110,6 +117,7 @@ class VoiceManager(context: Context) {
                     }
                 }
             }
+            AppLog.d("download", "received ${done / 1024} KB of ${total / 1024} KB")
             if (total > 0 && done != total) throw IOException("The download was cut short. Check your connection and try again.")
         } finally {
             conn.disconnect()

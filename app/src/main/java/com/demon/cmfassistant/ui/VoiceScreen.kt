@@ -35,6 +35,7 @@ fun VoiceScreen(
     settings: Settings,
     voice: VoiceHub,
     palette: GlyphPalette,
+    onOpenLog: () -> Unit,
     onClose: () -> Unit
 ) {
     val mono = FontFamily.Monospace
@@ -52,6 +53,14 @@ fun VoiceScreen(
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("CMF ASSISTANT", color = palette.muted, fontFamily = mono, fontSize = 11.sp, letterSpacing = 2.sp)
             Spacer(Modifier.weight(1f))
+            Text(
+                "LOG",
+                color = palette.muted,
+                fontFamily = mono,
+                fontSize = 11.sp,
+                letterSpacing = 2.sp,
+                modifier = Modifier.clickable(onClick = onOpenLog).padding(vertical = 8.dp, horizontal = 12.dp)
+            )
             Text(
                 "BACK",
                 color = palette.muted,

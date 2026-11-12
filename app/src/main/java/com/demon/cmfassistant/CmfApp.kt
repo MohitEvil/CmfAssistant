@@ -12,6 +12,7 @@ class CmfApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        com.demon.cmfassistant.debug.AppLog.init(this)
         settings = Settings(this)
         controller = AssistantController(this, settings)
     }

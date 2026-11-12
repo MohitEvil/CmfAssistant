@@ -55,6 +55,7 @@ fun SettingsScreen(
     onTestAi: suspend (String) -> String,
     onOpenPersona: () -> Unit,
     onOpenVoice: () -> Unit,
+    onOpenLog: () -> Unit,
     onClose: () -> Unit
 ) {
     val mono = FontFamily.Monospace
@@ -116,6 +117,23 @@ fun SettingsScreen(
                 Column(Modifier.weight(1f)) {
                     Text("Voice", color = palette.fg, fontSize = 15.sp)
                     Text("Offline neural voices, speaker and speed", color = palette.muted, fontSize = 12.sp)
+                }
+                Text("›", color = palette.muted, fontSize = 20.sp)
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Card(palette) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenLog)
+                    .padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Debug log", color = palette.fg, fontSize = 15.sp)
+                    Text("Temporary: see what the app and voices are doing", color = palette.muted, fontSize = 12.sp)
                 }
                 Text("›", color = palette.muted, fontSize = 20.sp)
             }

@@ -30,6 +30,7 @@ import com.demon.cmfassistant.service.OverlayService
 import com.demon.cmfassistant.ui.AssistantScreen
 import com.demon.cmfassistant.ui.DarkPalette
 import com.demon.cmfassistant.ui.LightPalette
+import com.demon.cmfassistant.ui.LogScreen
 import com.demon.cmfassistant.ui.PersonaScreen
 import com.demon.cmfassistant.ui.VoiceScreen
 import com.demon.cmfassistant.ui.SettingsScreen
@@ -81,6 +82,7 @@ class MainActivity : ComponentActivity() {
         var showSettings by remember { mutableStateOf(false) }
         var showPersona by remember { mutableStateOf(false) }
         var showVoice by remember { mutableStateOf(false) }
+        var showLog by remember { mutableStateOf(false) }
 
         val dark = when (settings.theme) {
             ThemeMode.DARK -> true
@@ -134,8 +136,9 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        BackHandler(enabled = showSettings || showPersona || showVoice || ui.state != AssistantState.IDLE) {
+        BackHandler(enabled = showLog || showSettings || showPersona || showVoice || ui.state != AssistantState.IDLE) {
             when {
+                showLog -> showLog = false
                 showVoice -> showVoice = false
                 showPersona -> showPersona = false
                 showSettings -> showSettings = false
@@ -143,11 +146,14 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        if (showVoice) {
+        if (showLog) {
+            LogScreen(palette = palette, onClose = { showLog = false })
+        } else if (showVoice) {
             VoiceScreen(
                 settings = settings,
                 voice = controller.voice,
                 palette = palette,
+                onOpenLog = { showLog = true },
                 onClose = { showVoice = false }
             )
         } else if (showPersona) {
@@ -191,6 +197,7 @@ class MainActivity : ComponentActivity() {
                 onTestAi = controller::testAi,
                 onOpenPersona = { showPersona = true },
                 onOpenVoice = { showVoice = true },
+                onOpenLog = { showLog = true },
                 onClose = { showSettings = false }
             )
         } else {

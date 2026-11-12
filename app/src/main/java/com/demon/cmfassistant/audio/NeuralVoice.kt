@@ -1,6 +1,7 @@
 package com.demon.cmfassistant.audio
 
 import android.content.Context
+import com.demon.cmfassistant.debug.AppLog
 import android.content.res.AssetManager
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
@@ -45,7 +46,14 @@ class NeuralVoice(private val context: Context) {
 
     /** True when the sherpa-onnx library was bundled into this build. */
     val libraryPresent: Boolean by lazy {
-        runCatching { Class.forName(PKG + "OfflineTts"); true }.getOrDefault(false)
+        try {
+            Class.forName(PKG + "OfflineTts")
+            AppLog.d("neural", "sherpa-onnx classes found, native library loaded")
+            true
+        } catch (t: Throwable) {
+            AppLog.e("neural", "sherpa-onnx NOT available (${t.javaClass.simpleName}: ${t.message})", t)
+            false
+        }
     }
 
     @Volatile
@@ -82,6 +90,7 @@ class NeuralVoice(private val context: Context) {
         if (phase == Phase.READY && loadedId == model.id) return
         phase = Phase.LOADING
         error = ""
+        AppLog.d("neural", "load requested: ${model.id} (${model.kind}) from ${dir.path}")
         loader.execute {
             try {
                 if (!libraryPresent) throw IllegalStateException("The neural engine isn't included in this build.")
@@ -95,12 +104,14 @@ class NeuralVoice(private val context: Context) {
                     kind = model.kind
                 }
                 old?.let { runCatching { it.javaClass.getMethod("release").invoke(it) } }
+                AppLog.d("neural", "READY: ${model.id}, sample rate $sr")
                 main.post {
                     phase = Phase.READY
                     onReady?.invoke()
                 }
             } catch (t: Throwable) {
                 val root = if (t is InvocationTargetException) t.cause ?: t else t
+                AppLog.e("neural", "load FAILED for ${model.id}", root)
                 main.post {
                     phase = Phase.ERROR
                     error = root.message ?: root.javaClass.simpleName
@@ -128,8 +139,12 @@ class NeuralVoice(private val context: Context) {
      * [onFail] runs if synthesis breaks part-way, so the caller can still say the line another way.
      */
     fun speak(raw: String, sid: Int, speed: Float, onDone: () -> Unit, onFail: () -> Unit): Boolean {
-        if (phase != Phase.READY) return false
+        if (phase != Phase.READY) {
+            AppLog.d("neural", "speak skipped, voice not ready (phase=$phase)")
+            return false
+        }
         val text = TextClean.forSpeech(raw)
+        AppLog.d("neural", "speak '${text.take(40)}' model=$loadedId sid=$sid speed=$speed")
         if (text.isBlank()) {
             main.post { onDone() }
             return true
@@ -144,6 +159,7 @@ class NeuralVoice(private val context: Context) {
             try {
                 val key = cacheKey(text, sid, speed)
                 val cached = if (text.length <= CACHE_MAX_CHARS) readCache(key) else null
+                AppLog.d("neural", if (cached != null) "cache hit (${cached.size} samples)" else "cache miss, generating")
                 val sr = rate
                 t = newTrack(sr)
                 track = t
@@ -177,6 +193,7 @@ class NeuralVoice(private val context: Context) {
             } catch (e: Throwable) {
                 failed = true
                 val root = if (e is InvocationTargetException) e.cause ?: e else e
+                AppLog.e("neural", "speak FAILED", root)
                 main.post {
                     phase = Phase.ERROR
                     error = root.message ?: root.javaClass.simpleName
@@ -223,6 +240,7 @@ class NeuralVoice(private val context: Context) {
                         }
                     }
                 } catch (e: Throwable) {
+                    AppLog.e("neural", "prewarm FAILED on '${p.take(30)}'", e)
                     return@execute
                 }
                 if (out.isNotEmpty()) writeCache(key, merge(out))
@@ -234,6 +252,11 @@ class NeuralVoice(private val context: Context) {
 
     private fun build(model: VoiceModel, dir: File): Pair<Any, Int> {
         val root = File(dir, "")
+        AppLog.d("neural", "build ${model.id}: checking files")
+        model.requiredFiles().forEach {
+            val f = File(root, it)
+            AppLog.d("neural", "  $it  " + if (!f.exists()) "MISSING" else if (f.isDirectory) "dir" else "${f.length() / 1024} KB")
+        }
         val missing = model.requiredFiles().firstOrNull { !File(root, it).exists() }
         if (missing != null) throw IllegalStateException("The voice files are incomplete ($missing). Delete the voice and download it again.")
         fun path(name: String) = File(root, name).absolutePath
@@ -298,7 +321,7 @@ class NeuralVoice(private val context: Context) {
             }
         }
         set(modelCfg, "numThreads", Runtime.getRuntime().availableProcessors().coerceIn(2, 4))
-        trySet(modelCfg, "debug", false)
+        trySet(modelCfg, "debug", true) // verbose engine messages go to the system log
 
         val cfg = bean("OfflineTtsConfig")
         set(cfg, "model", modelCfg)
@@ -308,11 +331,13 @@ class NeuralVoice(private val context: Context) {
         }
         trySet(cfg, "maxNumSentences", 1) // one sentence per chunk, so audio starts after the first sentence
 
+        AppLog.d("neural", "config built. Creating the engine now. If the app closes right after this line, the native engine crashed while loading the model.")
         val ttsCls = cls("OfflineTts")
         val ctor = ttsCls.constructors.firstOrNull {
             it.parameterTypes.size == 2 && it.parameterTypes[0] == AssetManager::class.java
         }
         val tts = if (ctor != null) ctor.newInstance(null, cfg) else ttsCls.getConstructor(cls("OfflineTtsConfig")).newInstance(cfg)
+        AppLog.d("neural", "engine created")
         val sr = ttsCls.getMethod("sampleRate").invoke(tts) as Int
         return tts to sr
     }
@@ -352,6 +377,9 @@ class NeuralVoice(private val context: Context) {
     /** Streams audio chunks to [onChunk]; the callback returns 1 to continue and 0 to stop. */
     private fun generate(text: String, sid: Int, speed: Float, onChunk: (FloatArray) -> Int) {
         val tts = engine ?: throw IllegalStateException("Voice isn't loaded.")
+        AppLog.d("neural", "generate start: '${text.take(30)}' kind=$kind sid=$sid. If the app closes after this line, the crash is inside synthesis.")
+        var chunks = 0
+        val counting: (FloatArray) -> Int = { x -> chunks++; if (chunks == 1) AppLog.d("neural", "first audio chunk (${x.size} samples)"); onChunk(x) }
         val methods = tts.javaClass.methods
         val withConfig = methods.firstOrNull { it.name == "generateWithConfigAndCallback" && it.parameterTypes.size == 3 }
         try {
@@ -371,10 +399,12 @@ class NeuralVoice(private val context: Context) {
                     trySet(g, "numSteps", 8)
                     trySet(g, "extra", mapOf("lang" to "en"))
                 }
-                withConfig.invoke(tts, text, g, onChunk)
+                withConfig.invoke(tts, text, g, counting)
+                AppLog.d("neural", "generate done, $chunks chunks")
             } else {
                 val older = methods.first { it.name == "generateWithCallback" && it.parameterTypes.size == 4 }
-                older.invoke(tts, text, sid, speed, onChunk)
+                older.invoke(tts, text, sid, speed, counting)
+                AppLog.d("neural", "generate done, $chunks chunks")
             }
         } catch (e: InvocationTargetException) {
             throw e.cause ?: e

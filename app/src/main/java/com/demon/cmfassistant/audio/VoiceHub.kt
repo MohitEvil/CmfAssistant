@@ -1,6 +1,7 @@
 package com.demon.cmfassistant.audio
 
 import android.content.Context
+import com.demon.cmfassistant.debug.AppLog
 import android.os.Handler
 import android.os.Looper
 import com.demon.cmfassistant.data.Settings
@@ -68,10 +69,11 @@ class VoiceHub(context: Context, private val settings: Settings) : Voice {
             val ok = neural.speak(
                 raw, settings.voiceSid, settings.voiceSpeed,
                 onDone = onDone,
-                onFail = { system.speak(raw, onDone) } // the neural voice broke: still say it
+                onFail = { AppLog.d("voice", "neural failed, falling back to phone voice"); system.speak(raw, onDone) } // the neural voice broke: still say it
             )
             if (ok) return
         }
+        AppLog.d("voice", "using phone voice (engine=${settings.voiceEngine}, neural=${neural.phase}${if (neural.error.isNotBlank()) ", error=" + neural.error else ""}, devanagari=$devanagari)")
         neural.stop()
         system.speak(raw, onDone)
     }
