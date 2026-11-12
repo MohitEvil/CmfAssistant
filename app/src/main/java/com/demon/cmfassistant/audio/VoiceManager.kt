@@ -39,8 +39,9 @@ class VoiceManager(context: Context) {
 
     fun dirFor(model: VoiceModel) = File(root, model.folder)
 
+    /** Installed only if the download finished completely (marker file) and every required file is present. */
     fun isInstalled(model: VoiceModel) =
-        File(dirFor(model), model.modelFile).exists() && model.extras.all { File(dirFor(model), it.second).exists() }
+        File(dirFor(model), ".complete").exists() && model.requiredFiles().all { File(dirFor(model), it).exists() }
 
     fun download(model: VoiceModel) {
         if (jobs[model.id]?.isActive == true) return
@@ -61,7 +62,12 @@ class VoiceManager(context: Context) {
                     tmp.copyTo(target, overwrite = true)
                     tmp.delete()
                 }
-                if (!isInstalled(model)) throw IOException("The download didn't contain the expected files.")
+                val missing = model.requiredFiles().filter { !File(dirFor(model), it).exists() }
+                if (missing.isNotEmpty()) {
+                    dirFor(model).deleteRecursively()
+                    throw IOException("The download was incomplete (missing ${missing.first()}). Try again.")
+                }
+                File(dirFor(model), ".complete").writeText("ok")
                 states[model.id] = InstallState(InstallPhase.INSTALLED)
                 onInstalled?.invoke(model)
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -104,6 +110,7 @@ class VoiceManager(context: Context) {
                     }
                 }
             }
+            if (total > 0 && done != total) throw IOException("The download was cut short. Check your connection and try again.")
         } finally {
             conn.disconnect()
         }
@@ -121,7 +128,7 @@ class VoiceManager(context: Context) {
 
     private fun extract(archive: File) {
         val base = root.canonicalPath + File.separator
-        TarArchiveInputStream(BZip2CompressorInputStream(BufferedInputStream(archive.inputStream(), 1 shl 16))).use { tar ->
+        TarArchiveInputStream(BZip2CompressorInputStream(BufferedInputStream(archive.inputStream(), 1 shl 16), true)).use { tar ->
             while (true) {
                 val entry: ArchiveEntry = tar.nextEntry ?: break
                 val dest = File(root, entry.name).canonicalFile

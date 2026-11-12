@@ -234,6 +234,8 @@ class NeuralVoice(private val context: Context) {
 
     private fun build(model: VoiceModel, dir: File): Pair<Any, Int> {
         val root = File(dir, "")
+        val missing = model.requiredFiles().firstOrNull { !File(root, it).exists() }
+        if (missing != null) throw IllegalStateException("The voice files are incomplete ($missing). Delete the voice and download it again.")
         fun path(name: String) = File(root, name).absolutePath
 
         val modelCfg = bean("OfflineTtsModelConfig")

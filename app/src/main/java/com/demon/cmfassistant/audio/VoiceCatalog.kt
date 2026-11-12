@@ -21,6 +21,22 @@ data class VoiceModel(
     val extras: List<Pair<String, String>> = emptyList()
 )
 
+/** Files that must exist in the model folder. A missing one makes the native engine abort the whole app. */
+fun VoiceModel.requiredFiles(): List<String> = when (kind) {
+    "kokoro" -> listOf(modelFile, "voices.bin", "tokens.txt", "espeak-ng-data")
+    "supertonic" -> listOf(
+        "duration_predictor.int8.onnx", "text_encoder.int8.onnx", "vector_estimator.int8.onnx",
+        "vocoder.int8.onnx", "tts.json", "unicode_indexer.bin", "voice.bin"
+    )
+    "matcha" -> listOf(modelFile, "tokens.txt", "espeak-ng-data")
+    "melo" -> listOf(modelFile, "lexicon.txt", "tokens.txt", "dict")
+    "pocket" -> listOf(
+        "lm_flow.int8.onnx", "lm_main.int8.onnx", "encoder.onnx", "decoder.int8.onnx",
+        "text_conditioner.onnx", "vocab.json", "token_scores.json"
+    )
+    else -> listOf(modelFile, "voices.bin", "tokens.txt", "espeak-ng-data")
+} + extras.map { it.second }
+
 object VoiceCatalog {
     /** Reference clip file names (assets/voice_refs) in the same order as the Zani style speaker ids. */
     val zaniRefs = listOf("zani_01_polite.wav", "zani_02_formal.wav", "zani_03_cynical.wav", "zani_04_caring.wav", "zani_05_weary.wav", "zani_06_warm.wav", "zani_07_deadpan.wav", "zani_08_firm.wav", "zani_09_critical.wav", "zani_10_cozy.wav", "zani_11_sweet.wav", "zani_12_nostalgic.wav", "zani_13_humorous.wav", "zani_14_realistic.wav", "zani_15_loyal.wav", "zani_16_admiring.wav", "zani_17_daydream.wav", "zani_18_upbeat.wav", "zani_19_wry.wav", "zani_20_heroic.wav")
