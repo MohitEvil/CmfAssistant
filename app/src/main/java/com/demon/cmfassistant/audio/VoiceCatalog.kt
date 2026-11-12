@@ -22,6 +22,9 @@ data class VoiceModel(
 )
 
 object VoiceCatalog {
+    /** Reference clip file names (assets/voice_refs) in the same order as the Zani style speaker ids. */
+    val zaniRefs = listOf({", ".join('"zani_%02d_%s.wav"'%(i+1,n) for i,n in enumerate(styles))})
+
     private const val BASE = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/"
 
     private val kittenVoices = listOf(
@@ -110,6 +113,19 @@ object VoiceCatalog {
             modelFile = "model.onnx",
             voices = listOf("Default" to 0),
             defaultSid = 0,
+            heavy = true
+        ),
+        VoiceModel(
+            id = "pocket-zani",
+            name = "ZANI (YOUR VOICE)",
+            blurb = "Kyutai Pocket TTS cloning your Zani samples. Each of the 20 styles is a speaker. Slower to start, so repeat phrases are cached.",
+            sizeLabel = "about 100 MB",
+            url = BASE + "sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2",
+            folder = "sherpa-onnx-pocket-tts-int8-2026-01-26",
+            kind = "pocket",
+            modelFile = "lm_main.int8.onnx",
+            voices = listOf("Polite" to 0, "Formal" to 1, "Cynical" to 2, "Caring" to 3, "Weary" to 4, "Warm" to 5, "Deadpan" to 6, "Firm" to 7, "Critical" to 8, "Cozy" to 9, "Sweet" to 10, "Nostalgic" to 11, "Humorous" to 12, "Realistic" to 13, "Loyal" to 14, "Admiring" to 15, "Daydream" to 16, "Upbeat" to 17, "Wry" to 18, "Heroic" to 19),
+            defaultSid = 5,
             heavy = true
         )
     )

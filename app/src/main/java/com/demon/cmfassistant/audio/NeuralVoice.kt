@@ -266,6 +266,18 @@ class NeuralVoice(private val context: Context) {
                 set(k, "dataDir", path("espeak-ng-data"))
                 set(modelCfg, "matcha", k)
             }
+            "pocket" -> {
+                val k = bean("OfflineTtsPocketModelConfig")
+                set(k, "lmFlow", path("lm_flow.int8.onnx"))
+                set(k, "lmMain", path("lm_main.int8.onnx"))
+                set(k, "encoder", path("encoder.onnx"))
+                set(k, "decoder", path("decoder.int8.onnx"))
+                set(k, "textConditioner", path("text_conditioner.onnx"))
+                set(k, "vocabJson", path("vocab.json"))
+                set(k, "tokenScoresJson", path("token_scores.json"))
+                trySet(k, "voiceEmbeddingCacheCapacity", 25)
+                set(modelCfg, "pocket", k)
+            }
             "melo" -> {
                 val k = bean("OfflineTtsVitsModelConfig")
                 set(k, "model", path(model.modelFile))
@@ -303,6 +315,38 @@ class NeuralVoice(private val context: Context) {
         return tts to sr
     }
 
+    private val refCache = HashMap<Int, Pair<FloatArray, Int>>()
+
+    /** Decodes the bundled 16-bit mono reference clip for a Zani style (cached in memory). */
+    private fun referenceFor(sid: Int): Pair<FloatArray, Int> = synchronized(refCache) {
+        refCache.getOrPut(sid) {
+            val name = VoiceCatalog.zaniRefs[sid.coerceIn(0, VoiceCatalog.zaniRefs.size - 1)]
+            val bytes = context.assets.open("voice_refs/$name").use { it.readBytes() }
+            val rate = (bytes[24].toInt() and 0xff) or ((bytes[25].toInt() and 0xff) shl 8) or
+                ((bytes[26].toInt() and 0xff) shl 16) or ((bytes[27].toInt() and 0xff) shl 24)
+            var pos = 12
+            var dataAt = 44
+            var dataLen = bytes.size - 44
+            while (pos + 8 <= bytes.size) { // find the "data" chunk instead of assuming a 44-byte header
+                val len = (bytes[pos + 4].toInt() and 0xff) or ((bytes[pos + 5].toInt() and 0xff) shl 8) or
+                    ((bytes[pos + 6].toInt() and 0xff) shl 16) or ((bytes[pos + 7].toInt() and 0xff) shl 24)
+                if (bytes[pos] == 'd'.code.toByte() && bytes[pos + 1] == 'a'.code.toByte()) {
+                    dataAt = pos + 8
+                    dataLen = minOf(len, bytes.size - dataAt)
+                    break
+                }
+                pos += 8 + len
+            }
+            val n = dataLen / 2
+            val out = FloatArray(n)
+            for (i in 0 until n) {
+                val v = (bytes[dataAt + 2 * i].toInt() and 0xff) or (bytes[dataAt + 2 * i + 1].toInt() shl 8)
+                out[i] = v.toShort() / 32768f
+            }
+            out to rate
+        }
+    }
+
     /** Streams audio chunks to [onChunk]; the callback returns 1 to continue and 0 to stop. */
     private fun generate(text: String, sid: Int, speed: Float, onChunk: (FloatArray) -> Int) {
         val tts = engine ?: throw IllegalStateException("Voice isn't loaded.")
@@ -314,6 +358,13 @@ class NeuralVoice(private val context: Context) {
                 trySet(g, "sid", sid)
                 trySet(g, "speed", speed)
                 trySet(g, "silenceScale", 0.15f)
+                if (kind == "pocket") {
+                    val (samples, ref) = referenceFor(sid)
+                    set(g, "referenceAudio", samples)
+                    set(g, "referenceSampleRate", ref)
+                    trySet(g, "numSteps", 5)
+                    trySet(g, "extra", mapOf("max_reference_audio_len" to "12", "seed" to "42"))
+                }
                 if (kind == "supertonic") {
                     trySet(g, "numSteps", 8)
                     trySet(g, "extra", mapOf("lang" to "en"))

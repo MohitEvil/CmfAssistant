@@ -25,7 +25,8 @@ Or in Android Studio: open the folder and press Run.
 
 - **Offline neural voice** (Settings > Voice). Download a voice once (Kitten Nano is tiny and fast, Kitten Mini is richer, Kokoro is the most natural but about 330 MB) and it works with no internet afterwards. It replaces the stock Android voice for English. Pick the speaker and speed there. Devanagari Hindi still uses the phone voice.
 - **More voices** (Settings > Voice): Supertonic 3 (10 voices, fast), Matcha + Vocos (single English voice) and MeloTTS (Chinese + English) join Kitten and Kokoro, all through sherpa-onnx.
-  - **Not included:** Kyutai Pocket TTS needs a reference voice clip and has no confirmed Android config yet. "Phonon 31M" is by Gradium (not Google) and ships as a GGUF for Gradium's own Rust runtime, not MediaPipe/LiteRT, so there is no way to run it in this app today.
+  - **Zani (your voice):** Kyutai Pocket TTS cloning the 20 sample clips you gave. Each style (polite, warm, wry, heroic...) is a speaker; the model takes one ~12 s reference at a time, so styles are switchable rather than blended.
+  - **Not included:**  "Phonon 31M" is by Gradium (not Google) and ships as a GGUF for Gradium's own Rust runtime, not MediaPipe/LiteRT, so there is no way to run it in this app today.
 - **Instant spoken status.** The spoken line now starts at the same moment the text appears, with no built-in waits. Short replies and "Opening <app>." are rendered ahead of time and cached, so they start at once.
 - **Thinking mode switch** (Settings > AI Chat). Off by default, which is faster. The old cut-off answers came from thinking tokens eating the reply limit; the limit is now much larger and a cut answer is ended at a full sentence.
 

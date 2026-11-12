@@ -116,29 +116,48 @@ class Settings(context: Context) {
     var aiThinking by mutableStateOf(sp.getBoolean("ai_thinking", false))
         private set
 
+    @JvmName("applyVoiceEngine")
+
     fun setVoiceEngine(v: String) { voiceEngine = v; sp.edit().putString("voice_engine", v).apply() }
+    @JvmName("applyVoiceSid")
     fun setVoiceSid(v: Int) { voiceSid = v; sp.edit().putInt("voice_sid", v).apply() }
+    @JvmName("applyVoiceSpeed")
     fun setVoiceSpeed(v: Float) { voiceSpeed = v; sp.edit().putFloat("voice_speed", v).apply() }
+    @JvmName("applyVoiceModel")
     fun setVoiceModel(id: String, sid: Int) {
         voiceModelId = id
         voiceSid = sid
         sp.edit().putString("voice_model", id).putInt("voice_sid", sid).apply()
     }
+    @JvmName("applyAiThinking")
     fun setAiThinking(v: Boolean) { aiThinking = v; sp.edit().putBoolean("ai_thinking", v).apply() }
+
+    @JvmName("applyAiPersona")
 
     fun setAiPersona(v: String) { aiPersona = v; sp.edit().putString("ai_persona", v).apply() }
 
+    @JvmName("applyHaptics")
+
     fun setHaptics(v: Boolean) { haptics = v; sp.edit().putBoolean("haptics", v).apply() }
+    @JvmName("applyAnimations")
     fun setAnimations(v: Boolean) { animations = v; sp.edit().putBoolean("animations", v).apply() }
+    @JvmName("applyBatterySaver")
     fun setBatterySaver(v: Boolean) { batterySaver = v; sp.edit().putBoolean("battery_saver", v).apply() }
+    @JvmName("applyBubble")
     fun setBubble(v: Boolean) { bubble = v; sp.edit().putBoolean("bubble", v).apply() }
+    @JvmName("applyPreferOffline")
     fun setPreferOffline(v: Boolean) { preferOffline = v; sp.edit().putBoolean("prefer_offline", v).apply() }
+    @JvmName("applyLanguage")
     fun setLanguage(v: String) { language = v; sp.edit().putString("language", v).apply() }
+    @JvmName("applyTheme")
     fun setTheme(v: Int) { theme = v; sp.edit().putInt("theme", v).apply() }
+    @JvmName("applySpeakReplies")
     fun setSpeakReplies(v: Boolean) { speakReplies = v; sp.edit().putBoolean("speak_replies", v).apply() }
+    @JvmName("applyFollowUp")
     fun setFollowUp(v: Boolean) { followUp = v; sp.edit().putBoolean("follow_up", v).apply() }
 
     /** Picking a preset fills in its address and model. Each provider keeps its own key. */
+    @JvmName("applyAiProvider")
     fun setAiProvider(id: String) {
         val preset = AiPresets.byId(id)
         aiProvider = id
@@ -154,8 +173,12 @@ class Settings(context: Context) {
             .apply()
     }
 
+    @JvmName("applyAiBaseUrl")
+
     fun setAiBaseUrl(v: String) { aiBaseUrl = v; sp.edit().putString("ai_base", v).apply() }
+    @JvmName("applyAiModel")
     fun setAiModel(v: String) { aiModel = v; sp.edit().putString("ai_model", v).apply() }
+    @JvmName("applyAiKey")
     fun setAiKey(v: String) { aiKey = v; sp.edit().putString("ai_key_$aiProvider", v).apply() }
 
     // Bubble position is not UI state, so it is read and written directly.
