@@ -496,7 +496,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
     /** Renders the short fixed replies (and "Opening <app>.") ahead of time so they start with no wait. */
     private fun prewarmVoice() {
         val model = voice.selectedModel()
-        val apps = if (model?.heavy == true) emptyList() else actions.appLabels().take(60).map { "Opening $it." }
+        val apps = actions.appLabels().take(if (model?.heavy == true) 12 else 60).map { "Opening $it." }
         voice.prewarm(VoiceCatalog.staticPhrases + apps)
     }
 

@@ -51,7 +51,7 @@ fun VoiceModel.findLexicon(dir: java.io.File): java.io.File? =
 
 object VoiceCatalog {
     /** Reference clip file names (assets/voice_refs) in the same order as the Zani speaker ids. */
-    val zaniRefs = listOf("zani_main.wav", "zani_calm.wav", "zani_bright.wav", "zani_serious.wav")
+    val zaniRefs = listOf("zani_main.wav", "zani_soft.wav", "zani_serious.wav", "zani_amused.wav")
 
     private const val BASE = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/"
 
@@ -93,13 +93,13 @@ object VoiceCatalog {
         VoiceModel(
             id = "pocket-zani",
             name = "ZANI (YOUR VOICE)",
-            blurb = "Your character voice. Kyutai Pocket TTS cloned from all 20 Zani clips blended into one voice, plus three moods. English only. Slower to start, so repeat phrases are cached.",
+            blurb = "Your character voice. Kyutai Pocket TTS cloned from your Zani voice samples, plus three moods (soft, serious, amused). English only. Slower to start, so repeat phrases are cached.",
             sizeLabel = "about 100 MB",
             url = BASE + "sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2",
             folder = "sherpa-onnx-pocket-tts-int8-2026-01-26",
             kind = "pocket",
             modelFile = "lm_main.int8.onnx",
-            voices = listOf("Zani" to 0, "Calm" to 1, "Bright" to 2, "Serious" to 3),
+            voices = listOf("Zani" to 0, "Soft" to 1, "Serious" to 2, "Amused" to 3),
             defaultSid = 0,
             heavy = true
         )

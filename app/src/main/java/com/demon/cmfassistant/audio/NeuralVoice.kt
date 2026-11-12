@@ -423,7 +423,7 @@ class NeuralVoice(private val context: Context) {
                     set(g, "referenceAudio", samples)
                     set(g, "referenceSampleRate", ref)
                     trySet(g, "numSteps", 5)
-                    trySet(g, "extra", mapOf("max_reference_audio_len" to "12", "seed" to "42"))
+                    trySet(g, "extra", mapOf("max_reference_audio_len" to "15", "seed" to "42"))
                 }
                 if (kind == "supertonic") {
                     trySet(g, "numSteps", 8)
@@ -501,7 +501,7 @@ class NeuralVoice(private val context: Context) {
     // ---- Phrase cache ----
 
     private fun cacheKey(text: String, sid: Int, speed: Float): String {
-        val raw = "$loadedId|$sid|$speed|$text"
+        val raw = "v2|$loadedId|$sid|$speed|$text"
         val d = MessageDigest.getInstance("SHA-1").digest(raw.toByteArray())
         return d.joinToString("") { "%02x".format(it) }
     }
