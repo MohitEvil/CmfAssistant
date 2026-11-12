@@ -23,7 +23,7 @@ data class VoiceModel(
 
 object VoiceCatalog {
     /** Reference clip file names (assets/voice_refs) in the same order as the Zani style speaker ids. */
-    val zaniRefs = listOf({", ".join('"zani_%02d_%s.wav"'%(i+1,n) for i,n in enumerate(styles))})
+    val zaniRefs = listOf("zani_01_polite.wav", "zani_02_formal.wav", "zani_03_cynical.wav", "zani_04_caring.wav", "zani_05_weary.wav", "zani_06_warm.wav", "zani_07_deadpan.wav", "zani_08_firm.wav", "zani_09_critical.wav", "zani_10_cozy.wav", "zani_11_sweet.wav", "zani_12_nostalgic.wav", "zani_13_humorous.wav", "zani_14_realistic.wav", "zani_15_loyal.wav", "zani_16_admiring.wav", "zani_17_daydream.wav", "zani_18_upbeat.wav", "zani_19_wry.wav", "zani_20_heroic.wav")
 
     private const val BASE = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/"
 
