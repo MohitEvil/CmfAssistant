@@ -75,7 +75,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
 
     private val history = ArrayList<Turn>()
 
-    private val speech = SpeechEngine(context, object : SpeechEngine.Listener {
+    private val speech: SpeechEngine = SpeechEngine(context, object : SpeechEngine.Listener {
         override fun onPartial(text: String) {
             if (!micActive) return
             if (mode == Mode.CONFIRM) {

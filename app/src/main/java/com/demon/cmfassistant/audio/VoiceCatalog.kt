@@ -9,14 +9,16 @@ data class VoiceModel(
     val url: String,
     /** Folder name inside the downloaded archive. */
     val folder: String,
-    /** "kitten" or "kokoro": which sherpa-onnx model type this is. */
+    /** "kitten", "kokoro", "supertonic", "matcha" or "melo": which sherpa-onnx model type this is. */
     val kind: String,
     val modelFile: String,
     /** Voice name to speaker id. */
     val voices: List<Pair<String, Int>>,
     val defaultSid: Int,
     /** Big models are slower, so the app skips the background phrase pre-render for them. */
-    val heavy: Boolean = false
+    val heavy: Boolean = false,
+    /** Extra single files to fetch into the model folder: (url, file name). Matcha needs a separate vocoder. */
+    val extras: List<Pair<String, String>> = emptyList()
 )
 
 object VoiceCatalog {
@@ -70,6 +72,44 @@ object VoiceCatalog {
                 "Emma (UK female)" to 21, "George (UK male)" to 26
             ),
             defaultSid = 3,
+            heavy = true
+        ),
+        VoiceModel(
+            id = "supertonic",
+            name = "SUPERTONIC 3",
+            blurb = "Fast, clean and natural. Ten voices, quick to start even on a phone.",
+            sizeLabel = "medium",
+            url = BASE + "sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2",
+            folder = "sherpa-onnx-supertonic-3-tts-int8-2026-05-11",
+            kind = "supertonic",
+            modelFile = "vector_estimator.int8.onnx",
+            voices = (1..10).map { "Voice $it" to (it - 1) },
+            defaultSid = 0
+        ),
+        VoiceModel(
+            id = "matcha-vocos",
+            name = "MATCHA + VOCOS",
+            blurb = "Matcha-TTS with the Vocos vocoder. Smooth single English voice (LJSpeech). Downloads two files.",
+            sizeLabel = "medium",
+            url = BASE + "matcha-icefall-en_US-ljspeech.tar.bz2",
+            folder = "matcha-icefall-en_US-ljspeech",
+            kind = "matcha",
+            modelFile = "model-steps-3.onnx",
+            voices = listOf("LJSpeech (female)" to 0),
+            defaultSid = 0,
+            extras = listOf("https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos-22khz-univ.onnx" to "vocos-22khz-univ.onnx")
+        ),
+        VoiceModel(
+            id = "melotts",
+            name = "MELOTTS",
+            blurb = "MeloTTS Chinese + English, one voice. English words work only if they are in its lexicon, so odd words may be skipped.",
+            sizeLabel = "about 160 MB",
+            url = BASE + "vits-melo-tts-zh_en.tar.bz2",
+            folder = "vits-melo-tts-zh_en",
+            kind = "melo",
+            modelFile = "model.onnx",
+            voices = listOf("Default" to 0),
+            defaultSid = 0,
             heavy = true
         )
     )

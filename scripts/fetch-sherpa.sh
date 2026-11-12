@@ -5,7 +5,9 @@
 set -u
 cd "$(dirname "$0")/.."
 
-TAG=$(curl -fsSL https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/latest | jq -r .tag_name)
+# "latest" can be a models-only release, so pick the newest real version tag (vX.Y.Z).
+TAG=$(curl -fsSL "https://api.github.com/repos/k2-fsa/sherpa-onnx/releases?per_page=50" \
+  | jq -r '[.[] | select(.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))][0].tag_name')
 if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then echo "Could not find the latest sherpa-onnx release."; exit 0; fi
 echo "Using sherpa-onnx $TAG"
 

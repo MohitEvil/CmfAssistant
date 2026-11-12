@@ -39,7 +39,8 @@ class VoiceManager(context: Context) {
 
     fun dirFor(model: VoiceModel) = File(root, model.folder)
 
-    fun isInstalled(model: VoiceModel) = File(dirFor(model), model.modelFile).exists()
+    fun isInstalled(model: VoiceModel) =
+        File(dirFor(model), model.modelFile).exists() && model.extras.all { File(dirFor(model), it.second).exists() }
 
     fun download(model: VoiceModel) {
         if (jobs[model.id]?.isActive == true) return
@@ -47,51 +48,64 @@ class VoiceManager(context: Context) {
             val part = File(root, model.id + ".part")
             try {
                 states[model.id] = InstallState(InstallPhase.DOWNLOADING, 0f)
-                val conn = URL(model.url).openConnection() as HttpURLConnection
-                conn.connectTimeout = 20_000
-                conn.readTimeout = 30_000
-                conn.instanceFollowRedirects = true
-                try {
-                    if (conn.responseCode !in 200..299) throw IOException("The server answered ${conn.responseCode}.")
-                    val total = conn.contentLengthLong
-                    var done = 0L
-                    var lastReport = 0L
-                    conn.inputStream.use { input ->
-                        part.outputStream().use { out ->
-                            val buf = ByteArray(64 * 1024)
-                            while (true) {
-                                ensureActive()
-                                val n = input.read(buf)
-                                if (n < 0) break
-                                out.write(buf, 0, n)
-                                done += n
-                                val now = System.currentTimeMillis()
-                                if (now - lastReport > 250) {
-                                    lastReport = now
-                                    val p = if (total > 0) done.toFloat() / total else 0f
-                                    states[model.id] = InstallState(InstallPhase.DOWNLOADING, p)
-                                }
-                            }
-                        }
-                    }
-                } finally {
-                    conn.disconnect()
-                }
-
+                val share = 1f / (1 + model.extras.size)
+                fetch(model.url, part, { ensureActive() }) { p -> states[model.id] = InstallState(InstallPhase.DOWNLOADING, p * share) }
                 states[model.id] = InstallState(InstallPhase.INSTALLING)
                 extract(part)
                 part.delete()
+                model.extras.forEachIndexed { i, (url, name) ->
+                    val target = File(dirFor(model), name)
+                    val tmp = File(root, model.id + ".extra")
+                    fetch(url, tmp, { ensureActive() }) { p -> states[model.id] = InstallState(InstallPhase.DOWNLOADING, share * (i + 1 + p)) }
+                    target.parentFile?.mkdirs()
+                    tmp.copyTo(target, overwrite = true)
+                    tmp.delete()
+                }
                 if (!isInstalled(model)) throw IOException("The download didn't contain the expected files.")
                 states[model.id] = InstallState(InstallPhase.INSTALLED)
                 onInstalled?.invoke(model)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 part.delete()
+                File(root, model.id + ".extra").delete()
                 states[model.id] = InstallState(InstallPhase.NOT_INSTALLED)
                 throw e
             } catch (e: Exception) {
                 part.delete()
+                File(root, model.id + ".extra").delete()
                 states[model.id] = InstallState(InstallPhase.FAILED, message = friendly(e))
             }
+        }
+    }
+
+    private fun fetch(url: String, dest: File, alive: () -> Unit, report: (Float) -> Unit) {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        conn.connectTimeout = 20_000
+        conn.readTimeout = 30_000
+        conn.instanceFollowRedirects = true
+        try {
+            if (conn.responseCode !in 200..299) throw IOException("The server answered ${conn.responseCode}.")
+            val total = conn.contentLengthLong
+            var done = 0L
+            var lastReport = 0L
+            conn.inputStream.use { input ->
+                dest.outputStream().use { out ->
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        alive()
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        done += n
+                        val now = System.currentTimeMillis()
+                        if (now - lastReport > 250) {
+                            lastReport = now
+                            report(if (total > 0) done.toFloat() / total else 0f)
+                        }
+                    }
+                }
+            }
+        } finally {
+            conn.disconnect()
         }
     }
 

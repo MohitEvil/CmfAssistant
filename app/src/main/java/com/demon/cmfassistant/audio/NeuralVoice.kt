@@ -67,6 +67,7 @@ class NeuralVoice(private val context: Context) {
     @Volatile private var engine: Any? = null
     @Volatile private var rate = 24000
     @Volatile private var loadedId = ""
+    @Volatile private var kind = ""
     @Volatile private var track: AudioTrack? = null
     private var focus: AudioFocusRequest? = null
 
@@ -91,6 +92,7 @@ class NeuralVoice(private val context: Context) {
                     engine = tts
                     rate = sr
                     loadedId = model.id
+                    kind = model.kind
                 }
                 old?.let { runCatching { it.javaClass.getMethod("release").invoke(it) } }
                 main.post {
@@ -245,6 +247,33 @@ class NeuralVoice(private val context: Context) {
                 trySet(k, "lexicon", path("lexicon-us-en.txt") + "," + path("lexicon-zh.txt"))
                 set(modelCfg, "kokoro", k)
             }
+            "supertonic" -> {
+                val k = bean("OfflineTtsSupertonicModelConfig")
+                set(k, "durationPredictor", path("duration_predictor.int8.onnx"))
+                set(k, "textEncoder", path("text_encoder.int8.onnx"))
+                set(k, "vectorEstimator", path(model.modelFile))
+                set(k, "vocoder", path("vocoder.int8.onnx"))
+                set(k, "ttsJson", path("tts.json"))
+                set(k, "unicodeIndexer", path("unicode_indexer.bin"))
+                set(k, "voiceStyle", path("voice.bin"))
+                set(modelCfg, "supertonic", k)
+            }
+            "matcha" -> {
+                val k = bean("OfflineTtsMatchaModelConfig")
+                set(k, "acousticModel", path(model.modelFile))
+                set(k, "vocoder", path(model.extras.first().second))
+                set(k, "tokens", path("tokens.txt"))
+                set(k, "dataDir", path("espeak-ng-data"))
+                set(modelCfg, "matcha", k)
+            }
+            "melo" -> {
+                val k = bean("OfflineTtsVitsModelConfig")
+                set(k, "model", path(model.modelFile))
+                set(k, "lexicon", path("lexicon.txt"))
+                set(k, "tokens", path("tokens.txt"))
+                set(k, "dictDir", path("dict"))
+                set(modelCfg, "vits", k)
+            }
             else -> {
                 val k = bean("OfflineTtsKittenModelConfig")
                 set(k, "model", path(model.modelFile))
@@ -259,6 +288,10 @@ class NeuralVoice(private val context: Context) {
 
         val cfg = bean("OfflineTtsConfig")
         set(cfg, "model", modelCfg)
+        if (model.kind == "melo") {
+            val fsts = listOf("date.fst", "number.fst").map { path(it) }.filter { File(it).exists() }
+            if (fsts.isNotEmpty()) trySet(cfg, "ruleFsts", fsts.joinToString(","))
+        }
         trySet(cfg, "maxNumSentences", 1) // one sentence per chunk, so audio starts after the first sentence
 
         val ttsCls = cls("OfflineTts")
@@ -281,6 +314,10 @@ class NeuralVoice(private val context: Context) {
                 trySet(g, "sid", sid)
                 trySet(g, "speed", speed)
                 trySet(g, "silenceScale", 0.15f)
+                if (kind == "supertonic") {
+                    trySet(g, "numSteps", 8)
+                    trySet(g, "extra", mapOf("lang" to "en"))
+                }
                 withConfig.invoke(tts, text, g, onChunk)
             } else {
                 val older = methods.first { it.name == "generateWithCallback" && it.parameterTypes.size == 4 }
