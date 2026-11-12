@@ -24,39 +24,7 @@ Or in Android Studio: open the folder and press Run.
 - Command confirmations are now varied and natural instead of echoing what you said.
 
 - **Offline neural voice** (Settings > Voice). Download a voice once (Supertonic is fast, Kokoro is the most natural but about 330 MB; Kitten was removed because the current engine can't speak it) and it works with no internet afterwards. It replaces the stock Android voice for English. Pick the speaker and speed there. Devanagari Hindi still uses the phone voice.
-- **More voices** (Settings > Voice): Supertonic 3 (10 voices, fast), Matcha + Vocos (single English voice) and MeloTTS (Chinese + English) join Kitten and Kokoro, all through sherpa-onnx.
-  - **Zani (your voice):** Kyutai Pocket TTS cloning the 20 sample clips you gave. Each style (polite, warm, wry, heroic...) is a speaker; the model takes one ~12 s reference at a time, so styles are switchable rather than blended.
-  - **Not included:**  "Phonon 31M" is by Gradium (not Google) and ships as a GGUF for Gradium's own Rust runtime, not MediaPipe/LiteRT, so there is no way to run it in this app today.
-- **Instant spoken status.** The spoken line now starts at the same moment the text appears, with no built-in waits. Short replies and "Opening <app>." are rendered ahead of time and cached, so they start at once.
-- **Thinking mode switch** (Settings > AI Chat). Off by default, which is faster. The old cut-off answers came from thinking tokens eating the reply limit; the limit is now much larger and a cut answer is ended at a full sentence.
-
-## What it does
-- States: READY, LISTENING, RECOGNIZING, THINKING, CONFIRM, EXECUTING, DONE, FAILED. Each has its own dot-matrix glyph.
-- Live microphone level drives the LISTENING ring. Live partial transcript shows while RECOGNIZING.
-- Sending a message always shows a confirmation card first; it then opens Messages with the text ready and you tap send.
-- Haptics are event-based only (mic on, recognised, action start, success, failure, cancel). Nothing vibrates continuously.
-- Pure black AMOLED dark theme, plus light theme and system-follow.
-- Battery aware: low-power mode or battery under 20% lowers frame rate; under 10% draws static glyphs. Idle is nearly static, and the mic is only open while listening.
-- Optional floating bubble (draws over other apps, tap to talk, drag to move).
-
-## Commands (all parsed on-device, no cloud AI)
-- "turn on / off the flashlight"
-- "open YouTube" (any installed app)
-- "set a timer for 5 minutes", "set an alarm for 6:30 am"
-- "call Mom", "text Mom saying on my way"
-- "volume up / down / 40 percent", "mute"
-- "pause", "play", "next song", "previous song"
-- "battery", "what time is it", "what's the date"
-- "open Bluetooth / Wi-Fi settings", "open camera"
-- "navigate to Connaught Place", "search for cricket scores"
-- Anything else is treated as a question or chat (needs an AI key for real answers)
-
-## Limits to know
-- Voice quality and Hindi depend on the text-to-speech voices installed on the phone (Settings > System > Languages > Text-to-speech).
-- The API key is stored on the phone in app storage, not encrypted. Use a key you can revoke.
-- The AI has no live internet, so news, scores and prices can't be answered live.
-- Speech recognition uses Android's built-in recogniser (Google). Offline works if the language pack is downloaded; otherwise it needs internet.
-- Android does not let normal apps toggle Wi-Fi or Bluetooth, so those open the settings panel.
-- This is a normal app, not a system assistant: launch it from the icon, the bubble, or an assist gesture if your phone offers this app for it.
-- The CMF Phone 1 has no rear Glyph lights, so the glyph visuals are on-screen only.
-- This was written without an Android SDK available, so it has not been compiled yet. If the first GitHub build shows an error, send me the log and I'll fix it.
+- **More voices** (Settings > Voice): Supertonic 3 (10 voices, fast, reads English and Hindi) and Kokoro (English). MeloTTS and Matcha + Vocos were removed as slow and unreliable.
+  - **Zani (your voice):** Kyutai Pocket TTS cloned from your 20 clips, blended into one voice (main) plus three moods (calm, bright, serious). English only.
+  - **Hinglish:** use the HINGLISH persona so replies mix Devanagari Hindi with English words. Supertonic speaks Devanagari as Hindi and Latin text as English.
+  - **Not included:** "Phonon 31M" is by Gradium (not Google) and ships as a GGUF for Gradium's own Rust runtime, not MediaPipe/LiteRT, so it can't run in this app today.

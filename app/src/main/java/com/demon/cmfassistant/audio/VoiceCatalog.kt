@@ -17,6 +17,8 @@ data class VoiceModel(
     val defaultSid: Int,
     /** Big models are slower, so the app skips the background phrase pre-render for them. */
     val heavy: Boolean = false,
+    /** True if the model can also read Hindi (Devanagari) text. */
+    val hindi: Boolean = false,
     /** Extra single files to fetch into the model folder: (url, file name). Matcha needs a separate vocoder. */
     val extras: List<Pair<String, String>> = emptyList()
 )
@@ -48,8 +50,8 @@ fun VoiceModel.findLexicon(dir: java.io.File): java.io.File? =
     dir.listFiles()?.filter { it.isFile && it.name.startsWith("lexicon") && it.name.endsWith(".txt") }?.minByOrNull { it.name }
 
 object VoiceCatalog {
-    /** Reference clip file names (assets/voice_refs) in the same order as the Zani style speaker ids. */
-    val zaniRefs = listOf("zani_01_polite.wav", "zani_02_formal.wav", "zani_03_cynical.wav", "zani_04_caring.wav", "zani_05_weary.wav", "zani_06_warm.wav", "zani_07_deadpan.wav", "zani_08_firm.wav", "zani_09_critical.wav", "zani_10_cozy.wav", "zani_11_sweet.wav", "zani_12_nostalgic.wav", "zani_13_humorous.wav", "zani_14_realistic.wav", "zani_15_loyal.wav", "zani_16_admiring.wav", "zani_17_daydream.wav", "zani_18_upbeat.wav", "zani_19_wry.wav", "zani_20_heroic.wav")
+    /** Reference clip file names (assets/voice_refs) in the same order as the Zani speaker ids. */
+    val zaniRefs = listOf("zani_main.wav", "zani_calm.wav", "zani_bright.wav", "zani_serious.wav")
 
     private const val BASE = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/"
 
@@ -78,52 +80,27 @@ object VoiceCatalog {
         VoiceModel(
             id = "supertonic",
             name = "SUPERTONIC 3",
-            blurb = "Fast, clean and natural. Ten voices, quick to start even on a phone.",
+            blurb = "Fast, clean and natural. Ten voices, quick to start, and it reads English and Hindi (Devanagari).",
             sizeLabel = "medium",
             url = BASE + "sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2",
             folder = "sherpa-onnx-supertonic-3-tts-int8-2026-05-11",
             kind = "supertonic",
             modelFile = "vector_estimator.int8.onnx",
             voices = (1..10).map { "Voice $it" to (it - 1) },
-            defaultSid = 0
-        ),
-        VoiceModel(
-            id = "matcha-vocos",
-            name = "MATCHA + VOCOS",
-            blurb = "Matcha-TTS with the Vocos vocoder. Smooth single English voice (LJSpeech). Downloads two files.",
-            sizeLabel = "medium",
-            url = BASE + "matcha-icefall-en_US-ljspeech.tar.bz2",
-            folder = "matcha-icefall-en_US-ljspeech",
-            kind = "matcha",
-            modelFile = "model-steps-3.onnx",
-            voices = listOf("LJSpeech (female)" to 0),
             defaultSid = 0,
-            extras = listOf("https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos-22khz-univ.onnx" to "vocos-22khz-univ.onnx")
-        ),
-        VoiceModel(
-            id = "melotts",
-            name = "MELOTTS",
-            blurb = "MeloTTS Chinese + English, one voice. English words work only if they are in its lexicon, so odd words may be skipped.",
-            sizeLabel = "about 160 MB",
-            url = BASE + "vits-melo-tts-zh_en.tar.bz2",
-            folder = "vits-melo-tts-zh_en",
-            kind = "melo",
-            modelFile = "model.onnx",
-            voices = listOf("Default" to 0),
-            defaultSid = 0,
-            heavy = true
+            hindi = true
         ),
         VoiceModel(
             id = "pocket-zani",
             name = "ZANI (YOUR VOICE)",
-            blurb = "Kyutai Pocket TTS cloning your Zani samples. Each of the 20 styles is a speaker. Slower to start, so repeat phrases are cached.",
+            blurb = "Your character voice. Kyutai Pocket TTS cloned from all 20 Zani clips blended into one voice, plus three moods. English only. Slower to start, so repeat phrases are cached.",
             sizeLabel = "about 100 MB",
             url = BASE + "sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2",
             folder = "sherpa-onnx-pocket-tts-int8-2026-01-26",
             kind = "pocket",
             modelFile = "lm_main.int8.onnx",
-            voices = listOf("Polite" to 0, "Formal" to 1, "Cynical" to 2, "Caring" to 3, "Weary" to 4, "Warm" to 5, "Deadpan" to 6, "Firm" to 7, "Critical" to 8, "Cozy" to 9, "Sweet" to 10, "Nostalgic" to 11, "Humorous" to 12, "Realistic" to 13, "Loyal" to 14, "Admiring" to 15, "Daydream" to 16, "Upbeat" to 17, "Wry" to 18, "Heroic" to 19),
-            defaultSid = 5,
+            voices = listOf("Zani" to 0, "Calm" to 1, "Bright" to 2, "Serious" to 3),
+            defaultSid = 0,
             heavy = true
         )
     )

@@ -57,6 +57,11 @@ object PersonaPresets {
                 "Keep it casual, warm and short, one or two sentences."
         ),
         Preset(
+            "HINGLISH",
+            "You talk in natural Hinglish like a close friend: write Hindi words in Devanagari and English words in English, " +
+                "mixed the way people speak, for example: ठीक है, मैं time देख लेता हूँ. Keep it casual and short, one or two sentences."
+        ),
+        Preset(
             "FORMAL",
             "You are a polite, professional assistant. Use clear, complete sentences with no slang, and keep replies " +
                 "to two sentences unless asked for more."

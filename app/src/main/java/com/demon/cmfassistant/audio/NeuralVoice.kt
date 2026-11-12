@@ -427,7 +427,7 @@ class NeuralVoice(private val context: Context) {
                 }
                 if (kind == "supertonic") {
                     trySet(g, "numSteps", 8)
-                    trySet(g, "extra", mapOf("lang" to "en"))
+                    trySet(g, "extra", mapOf("lang" to if (text.any { it in 'ऀ'..'ॿ' }) "hi" else "en"))
                 }
                 withConfig.invoke(tts, text, g, cb)
                 AppLog.d("neural", "generate done, ${cb.chunks} chunks")

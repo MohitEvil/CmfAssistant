@@ -75,7 +75,7 @@ fun VoiceScreen(
         Spacer(Modifier.height(14.dp))
         Text(
             "Download a voice once and it works fully offline, with no internet needed after that. " +
-                "Hindi in Devanagari still uses your phone's own voice.",
+                "Hindi in Devanagari is read by Supertonic; other voices hand Hindi to your phone's own voice.",
             color = palette.muted,
             fontSize = 12.sp
         )

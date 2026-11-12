@@ -35,8 +35,8 @@ class VoiceManager(context: Context) {
     val states = mutableStateMapOf<String, InstallState>()
 
     init {
-        // Clear out the removed Kitten downloads to free space.
-        root.listFiles()?.filter { it.isDirectory && it.name.startsWith("kitten") }?.forEach { it.deleteRecursively() }
+        // Clear out the removed Kitten, Matcha and Melo downloads to free space.
+        root.listFiles()?.filter { it.isDirectory && (it.name.startsWith("kitten") || it.name.startsWith("matcha") || it.name.startsWith("vits-melo")) }?.forEach { it.deleteRecursively() }
         VoiceCatalog.all.forEach { states[it.id] = if (isInstalled(it)) InstallState(InstallPhase.INSTALLED) else InstallState(InstallPhase.NOT_INSTALLED) }
     }
 

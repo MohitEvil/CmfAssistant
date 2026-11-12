@@ -8,7 +8,7 @@ import com.demon.cmfassistant.data.Settings
 
 /**
  * One place for everything voice. Uses the offline neural voice when it's installed and ready,
- * and quietly falls back to the device voice otherwise (and for Devanagari text, which the neural models don't cover).
+ * and quietly falls back to the device voice otherwise (and for Devanagari text unless the voice reads Hindi).
  */
 class VoiceHub(context: Context, private val settings: Settings) : Voice {
 
@@ -62,6 +62,7 @@ class VoiceHub(context: Context, private val settings: Settings) : Voice {
             neural.fail("This voice crashed the app last time it ran, so it's switched off. Tap USE to try again or delete and re-download it.")
             return
         }
+        if (settings.voiceSid !in model.voices.map { it.second }) settings.setVoiceSid(model.defaultSid)
         neural.load(model, manager.dirFor(model))
     }
 
@@ -87,7 +88,8 @@ class VoiceHub(context: Context, private val settings: Settings) : Voice {
 
     override fun speak(raw: String, onDone: () -> Unit) {
         val devanagari = raw.any { it in 'ऀ'..'ॿ' }
-        if (settings.voiceEngine == "neural" && neural.phase == NeuralVoice.Phase.READY && !devanagari) {
+        val model = selectedModel()
+        if (settings.voiceEngine == "neural" && neural.phase == NeuralVoice.Phase.READY && (!devanagari || model?.hindi == true)) {
             system.stop()
             val ok = neural.speak(
                 raw, settings.voiceSid, settings.voiceSpeed,
