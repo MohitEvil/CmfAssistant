@@ -409,8 +409,7 @@ class NeuralVoice(private val context: Context) {
     private fun generate(text: String, sid: Int, speed: Float, onChunk: (FloatArray) -> Int) {
         val tts = engine ?: throw IllegalStateException("Voice isn't loaded.")
         AppLog.d("neural", "generate start: '${text.take(30)}' kind=$kind sid=$sid. If the app closes after this line, the crash is inside synthesis.")
-        var chunks = 0
-        val counting: (FloatArray) -> Int = { x -> chunks++; if (chunks == 1) AppLog.d("neural", "first audio chunk (${x.size} samples)"); onChunk(x) }
+        val cb = SamplesCallback(onChunk)
         val methods = tts.javaClass.methods
         val withConfig = methods.firstOrNull { it.name == "generateWithConfigAndCallback" && it.parameterTypes.size == 3 }
         try {
@@ -430,12 +429,12 @@ class NeuralVoice(private val context: Context) {
                     trySet(g, "numSteps", 8)
                     trySet(g, "extra", mapOf("lang" to "en"))
                 }
-                withConfig.invoke(tts, text, g, counting)
-                AppLog.d("neural", "generate done, $chunks chunks")
+                withConfig.invoke(tts, text, g, cb)
+                AppLog.d("neural", "generate done, ${cb.chunks} chunks")
             } else {
                 val older = methods.first { it.name == "generateWithCallback" && it.parameterTypes.size == 4 }
-                older.invoke(tts, text, sid, speed, counting)
-                AppLog.d("neural", "generate done, $chunks chunks")
+                older.invoke(tts, text, sid, speed, cb)
+                AppLog.d("neural", "generate done, ${cb.chunks} chunks")
             }
         } catch (e: InvocationTargetException) {
             throw e.cause ?: e
@@ -542,5 +541,22 @@ class NeuralVoice(private val context: Context) {
     companion object {
         private const val PKG = "com.k2fsa.sherpa.onnx."
         private const val CACHE_MAX_CHARS = 90
+    }
+}
+
+
+/**
+ * The audio callback handed to the native engine. It is a real named class (not a lambda) on purpose:
+ * the engine looks up `invoke([F)Ljava/lang/Integer;` on it by name, and the code shrinker removes that
+ * method from lambdas, which made the whole app abort on the first chunk of audio.
+ */
+class SamplesCallback(private val target: (FloatArray) -> Int) : (FloatArray) -> Int {
+    @Volatile
+    var chunks = 0
+
+    override fun invoke(samples: FloatArray): Int {
+        chunks++
+        if (chunks == 1) AppLog.d("neural", "first audio chunk (${samples.size} samples)")
+        return target(samples)
     }
 }

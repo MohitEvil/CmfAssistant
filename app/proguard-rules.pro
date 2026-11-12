@@ -9,3 +9,7 @@
 -dontwarn org.brotli.dec.**
 -dontwarn org.objectweb.asm.**
 -dontwarn javax.annotation.**
+
+# The native engine calls the audio callback by method name, so it must keep its exact shape.
+-keep class com.demon.cmfassistant.audio.SamplesCallback { *; }
+-keep class kotlin.jvm.functions.Function1 { *; }
