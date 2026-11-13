@@ -188,41 +188,67 @@ class NeuralVoice(private val context: Context) {
             var t: AudioTrack? = null
             var failed = false
             try {
-                val key = cacheKey(text, sid, speed)
-                val cached = if (text.length <= CACHE_MAX_CHARS) readCache(key) else null
-                AppLog.d("neural", if (cached != null) "cache hit (${cached.size} samples)" else "cache miss, generating")
+                val parts = splitTemplate(text)
                 val sr = rate
                 t = newTrack(sr)
                 track = t
                 t.play()
+                val tr = t
                 val written = AtomicLong(0)
-                if (cached != null) {
-                    val loud = boost(cached)
-                    markStarted()
-                    t.write(loud, 0, loud.size, AudioTrack.WRITE_BLOCKING)
-                    written.set(cached.size.toLong())
-                } else {
-                    val keep = if (text.length <= CACHE_MAX_CHARS) ArrayList<FloatArray>() else null
-                    val tr = t
-                    synchronized(lock) {
-                        generate(text, sid, speed) { samples ->
-                            if (gen.get() != myGen) {
-                                0
-                            } else {
-                                val loud = boost(samples)
-                                markStarted()
-                                tr.write(loud, 0, loud.size, AudioTrack.WRITE_BLOCKING)
-                                written.addAndGet(samples.size.toLong())
-                                keep?.add(samples)
-                                1
+                val split = parts.size > 1
+                if (split) AppLog.d("neural", "reply built from parts: $parts")
+                for ((idx, part) in parts.withIndex()) {
+                    if (gen.get() != myGen) break
+                    val key = cacheKey(part, sid, speed)
+                    val cacheable = part.length <= CACHE_MAX_CHARS
+                    val cached = if (cacheable) readCache(key) else null
+                    AppLog.d("neural", (if (cached != null) "cache hit" else "cache miss, generating") + " for '${part.take(30)}'")
+                    if (cached != null) {
+                        val piece = if (split) trimEdges(cached, sr) else cached
+                        val loud = boost(piece)
+                        markStarted()
+                        tr.write(loud, 0, loud.size, AudioTrack.WRITE_BLOCKING)
+                        written.addAndGet(piece.size.toLong())
+                    } else {
+                        val keep = if (cacheable) ArrayList<FloatArray>() else null
+                        val before = written.get()
+                        val hold = split && idx == 0 // the short opening word is trimmed as a whole before it plays
+                        val held = ArrayList<FloatArray>()
+                        var firstChunk = true
+                        synchronized(lock) {
+                            generate(part, sid, speed) { samples ->
+                                if (gen.get() != myGen) {
+                                    0
+                                } else {
+                                    keep?.add(samples)
+                                    if (hold) {
+                                        held.add(samples)
+                                    } else {
+                                        val piece = if (split && firstChunk) trimEdges(samples, sr, trailing = false) else samples
+                                        firstChunk = false
+                                        val loud = boost(piece)
+                                        markStarted()
+                                        tr.write(loud, 0, loud.size, AudioTrack.WRITE_BLOCKING)
+                                        written.addAndGet(piece.size.toLong())
+                                    }
+                                    1
+                                }
                             }
                         }
+                        if (hold && gen.get() == myGen && held.isNotEmpty()) {
+                            val piece = trimEdges(merge(held), sr)
+                            val loud = boost(piece)
+                            markStarted()
+                            tr.write(loud, 0, loud.size, AudioTrack.WRITE_BLOCKING)
+                            written.addAndGet(piece.size.toLong())
+                        }
+                        if (gen.get() == myGen && written.get() == before) throw IllegalStateException("The voice produced no audio for this text.")
+                        if (keep != null && gen.get() == myGen && keep.isNotEmpty()) writeCache(key, merge(keep))
                     }
-                    if (gen.get() == myGen && written.get() == 0L) throw IllegalStateException("The voice produced no audio for this text.")
-                    if (keep != null && gen.get() == myGen && keep.isNotEmpty()) writeCache(key, merge(keep))
                 }
+                val sr2 = sr
                 // Wait for the speaker to finish what was queued.
-                val deadline = System.currentTimeMillis() + written.get() * 1000L / sr + 2000L
+                val deadline = System.currentTimeMillis() + written.get() * 1000L / sr2 + 2000L
                 while (gen.get() == myGen && t.playbackHeadPosition < written.get() && System.currentTimeMillis() < deadline) {
                     Thread.sleep(10)
                 }
@@ -265,7 +291,8 @@ class NeuralVoice(private val context: Context) {
         val id = loadedId
         val mine = warmGen.incrementAndGet() // a newer request (for example a new speaker) cancels this one
         warm.execute {
-            for (p in phrases) {
+            val parts = phrases.flatMap { splitTemplate(it) }.distinct() // "Opening" is rendered once, then each app name
+            for (p in parts) {
                 var done = false
                 while (!done) {
                     if (phase != Phase.READY || loadedId != id || warmGen.get() != mine) return@execute
@@ -405,6 +432,37 @@ class NeuralVoice(private val context: Context) {
         AppLog.d("neural", "engine created")
         val sr = ttsCls.getMethod("sampleRate").invoke(tts) as Int
         return tts to sr
+    }
+
+    /**
+     * Fixed openings that are cached once and joined with the changing part, so "Opening YouTube." only needs the app name
+     * generated (and the name is generated while the opening word is already playing).
+     */
+    private fun splitTemplate(text: String): List<String> {
+        for (prefix in TEMPLATES) {
+            if (text.startsWith("$prefix ")) {
+                val rest = text.substring(prefix.length + 1).trim()
+                if (rest.length in 2..40) return listOf(prefix, rest)
+            }
+        }
+        return listOf(text)
+    }
+
+    /** Cuts silence off the ends of a clip (keeping a short pad) so joined parts flow without gaps. */
+    private fun trimEdges(x: FloatArray, sr: Int, leading: Boolean = true, trailing: Boolean = true): FloatArray {
+        if (x.isEmpty()) return x
+        val pad = sr / 66 // about 15 ms
+        var a = 0
+        var b = x.size
+        if (leading) {
+            while (a < x.size && Math.abs(x[a]) < 0.01f) a++
+            a = maxOf(0, a - pad)
+        }
+        if (trailing) {
+            while (b > a && Math.abs(x[b - 1]) < 0.01f) b--
+            b = minOf(x.size, b + pad)
+        }
+        return if (b > a) x.copyOfRange(a, b) else x
     }
 
     /** Makes the voice louder: a gain with a soft limiter so peaks round off instead of crackling. */
@@ -587,6 +645,7 @@ class NeuralVoice(private val context: Context) {
         const val GAIN = 1.9f
         private const val PKG = "com.k2fsa.sherpa.onnx."
         private const val CACHE_MAX_CHARS = 90
+        private val TEMPLATES = listOf("Opening")
     }
 }
 
