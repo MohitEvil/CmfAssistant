@@ -290,7 +290,10 @@ class AssistantController(private val context: Context, val settings: Settings) 
     private suspend fun execute(cmd: Command, text: String) {
         haptics.lightTap()
         when (val result = actions.run(cmd)) {
-            is ActionResult.Success -> success(result.message, text)
+            is ActionResult.Success -> {
+                val launch = result.launch
+                if (launch == null) success(result.message, text) else successLaunching(result.message, text, launch)
+            }
             is ActionResult.Failure -> fail(result.message, text)
             is ActionResult.Confirm -> askConfirm(
                 PendingConfirm(
@@ -447,6 +450,25 @@ class AssistantController(private val context: Context, val settings: Settings) 
         scheduleIdle(1800)
     }
 
+    /** Shows and speaks the reply, and starts the action (opening an app) the moment the voice begins, so the two line up. */
+    private fun successLaunching(message: String, transcript: String, launch: () -> Unit) {
+        flow++
+        transition(AssistantState.SUCCESS, message, transcript)
+        haptics.success()
+        val fired = java.util.concurrent.atomic.AtomicBoolean(false)
+        val go = { if (fired.compareAndSet(false, true)) launch() }
+        if (settings.speakReplies && voice.available) {
+            voice.speak(message, { go() }, {})
+            scope.launch {
+                delay(350) // never hold the action back longer than this if the voice is slow to start
+                go()
+            }
+        } else {
+            go()
+        }
+        scheduleIdle(1800)
+    }
+
     private fun fail(message: String, transcript: String = _ui.value.transcript) {
         flow++
         transition(AssistantState.FAILURE, message, transcript)
@@ -496,7 +518,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
     /** Renders the short fixed replies (and "Opening <app>.") ahead of time so they start with no wait. */
     private fun prewarmVoice() {
         val model = voice.selectedModel()
-        val apps = actions.appLabels().take(if (model?.heavy == true) 12 else 60).map { "Opening $it." }
+        val apps = actions.appLabels().take(if (model?.heavy == true) 100 else 60).map { "Opening $it." }
         voice.prewarm(VoiceCatalog.staticPhrases + apps)
     }
 

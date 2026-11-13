@@ -191,6 +191,7 @@ fun VoiceScreen(
                 selected.voices.forEach { (name, sid) ->
                     Chip(name.uppercase(), settings.voiceSid == sid, palette) {
                         settings.setVoiceSid(sid)
+                        voice.rewarm()
                         voice.speak("Hi, this is how I sound.") {}
                     }
                 }
@@ -202,6 +203,7 @@ fun VoiceScreen(
                 listOf("RELAXED" to 1.0f, "NORMAL" to 1.15f, "QUICK" to 1.3f, "TURBO" to 1.5f).forEach { (name, v) ->
                     Chip(name, settings.voiceSpeed == v, palette) {
                         settings.setVoiceSpeed(v)
+                        voice.rewarm()
                         voice.speak("Hey, this is my speed.") {}
                     }
                 }

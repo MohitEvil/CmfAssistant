@@ -83,6 +83,9 @@ class NeuralVoice(private val context: Context) {
     private val warm = Executors.newSingleThreadExecutor()
     private val lock = Any()
     private val gen = AtomicInteger(0)
+    /** Number of real speech requests waiting or running. Background pre-rendering steps aside while this is above zero. */
+    private val urgent = AtomicInteger(0)
+    private val warmGen = AtomicInteger(0)
     private val audio = context.getSystemService(AudioManager::class.java)
     private val attrs = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_ASSISTANT)
@@ -157,7 +160,7 @@ class NeuralVoice(private val context: Context) {
      * Returns false if the voice isn't ready (the caller should use another voice).
      * [onFail] runs if synthesis breaks part-way, so the caller can still say the line another way.
      */
-    fun speak(raw: String, sid: Int, speed: Float, onDone: () -> Unit, onFail: () -> Unit): Boolean {
+    fun speak(raw: String, sid: Int, speed: Float, onDone: () -> Unit, onFail: () -> Unit, onStart: (() -> Unit)? = null): Boolean {
         if (phase != Phase.READY) {
             AppLog.d("neural", "speak skipped, voice not ready (phase=$phase)")
             return false
@@ -169,10 +172,19 @@ class NeuralVoice(private val context: Context) {
             return true
         }
         val myGen = gen.incrementAndGet()
+        urgent.incrementAndGet()
         speaking = true
         stopTrack()
         requestFocus()
         synth.execute {
+            runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO) }
+            var started = false
+            val markStarted = {
+                if (!started) {
+                    started = true
+                    if (onStart != null) main.post { onStart() }
+                }
+            }
             var t: AudioTrack? = null
             var failed = false
             try {
@@ -186,6 +198,7 @@ class NeuralVoice(private val context: Context) {
                 val written = AtomicLong(0)
                 if (cached != null) {
                     val loud = boost(cached)
+                    markStarted()
                     t.write(loud, 0, loud.size, AudioTrack.WRITE_BLOCKING)
                     written.set(cached.size.toLong())
                 } else {
@@ -197,6 +210,7 @@ class NeuralVoice(private val context: Context) {
                                 0
                             } else {
                                 val loud = boost(samples)
+                                markStarted()
                                 tr.write(loud, 0, loud.size, AudioTrack.WRITE_BLOCKING)
                                 written.addAndGet(samples.size.toLong())
                                 keep?.add(samples)
@@ -221,11 +235,13 @@ class NeuralVoice(private val context: Context) {
                     error = root.message ?: root.javaClass.simpleName
                 }
             } finally {
+                urgent.decrementAndGet()
                 t?.let { tr ->
                     runCatching { tr.stop() }
                     runCatching { tr.release() }
                     if (track === tr) track = null
                 }
+                markStarted()
                 if (gen.get() == myGen) {
                     speaking = false
                     abandonFocus()
@@ -247,30 +263,46 @@ class NeuralVoice(private val context: Context) {
     fun prewarm(phrases: List<String>, sid: Int, speed: Float) {
         if (phase != Phase.READY) return
         val id = loadedId
+        val mine = warmGen.incrementAndGet() // a newer request (for example a new speaker) cancels this one
         warm.execute {
             for (p in phrases) {
-                if (phase != Phase.READY || loadedId != id) return@execute
-                val key = cacheKey(p, sid, speed)
-                if (readCache(key) != null) continue
-                while (speaking) Thread.sleep(200)
-                val out = ArrayList<FloatArray>()
-                try {
-                    synchronized(lock) {
-                        generate(p, sid, speed) { samples ->
-                            out.add(samples)
-                            1
-                        }
+                var done = false
+                while (!done) {
+                    if (phase != Phase.READY || loadedId != id || warmGen.get() != mine) return@execute
+                    val key = cacheKey(p, sid, speed)
+                    if (readCache(key) != null) break
+                    while (speaking || urgent.get() > 0) {
+                        if (warmGen.get() != mine) return@execute
+                        Thread.sleep(150)
                     }
-                } catch (e: Throwable) {
-                    AppLog.e("neural", "prewarm FAILED on '${p.take(30)}'", e)
-                    return@execute
+                    val out = ArrayList<FloatArray>()
+                    var aborted = false
+                    try {
+                        synchronized(lock) {
+                            generate(p, sid, speed) { samples ->
+                                if (urgent.get() > 0 || warmGen.get() != mine) {
+                                    aborted = true // real speech is waiting: stop at once so it isn't delayed
+                                    0
+                                } else {
+                                    out.add(samples)
+                                    1
+                                }
+                            }
+                        }
+                    } catch (e: Throwable) {
+                        AppLog.e("neural", "prewarm FAILED on '${p.take(30)}'", e)
+                        return@execute
+                    }
+                    if (aborted) continue // try this phrase again once the speech is over
+                    if (out.isEmpty()) {
+                        AppLog.e("neural", "prewarm stopped: the voice produced no audio for '${p.take(30)}'")
+                        return@execute
+                    }
+                    writeCache(key, merge(out))
+                    done = true
                 }
-                if (out.isEmpty()) {
-                    AppLog.e("neural", "prewarm stopped: the voice produced no audio for '${p.take(30)}'")
-                    return@execute
-                }
-                writeCache(key, merge(out))
             }
+            AppLog.d("neural", "prewarm finished (${phrases.size} phrases)")
         }
     }
 
@@ -435,7 +467,7 @@ class NeuralVoice(private val context: Context) {
                     val (samples, ref) = referenceFor(sid)
                     set(g, "referenceAudio", samples)
                     set(g, "referenceSampleRate", ref)
-                    trySet(g, "numSteps", 5)
+                    trySet(g, "numSteps", 4)
                     trySet(g, "extra", mapOf("max_reference_audio_len" to "15", "seed" to "42"))
                 }
                 if (kind == "supertonic") {

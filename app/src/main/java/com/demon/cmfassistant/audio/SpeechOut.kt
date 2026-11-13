@@ -18,7 +18,7 @@ import java.util.Locale
  */
 class SpeechOut(context: Context, private val settings: Settings) : Voice {
 
-    private class Pending(val text: String, val onDone: () -> Unit)
+    private class Pending(val text: String, val onStart: () -> Unit, val onDone: () -> Unit)
 
     private val main = Handler(Looper.getMainLooper())
     private val audio = context.getSystemService(AudioManager::class.java)
@@ -33,6 +33,7 @@ class SpeechOut(context: Context, private val settings: Settings) : Voice {
     private var focus: AudioFocusRequest? = null
     private var counter = 0
     private val callbacks = HashMap<String, () -> Unit>()
+    private val starts = HashMap<String, () -> Unit>()
 
     /** False if the phone has no working speech engine; callers then just stay silent. */
     override var available = true
@@ -41,7 +42,9 @@ class SpeechOut(context: Context, private val settings: Settings) : Voice {
     override val isSpeaking: Boolean get() = tts?.isSpeaking == true
 
     private val listener = object : UtteranceProgressListener() {
-        override fun onStart(utteranceId: String?) {}
+        override fun onStart(utteranceId: String?) {
+            main.post { utteranceId?.let { starts.remove(it) }?.invoke() }
+        }
         override fun onDone(utteranceId: String?) = finish(utteranceId)
 
         @Deprecated("Deprecated in Java")
@@ -59,7 +62,7 @@ class SpeechOut(context: Context, private val settings: Settings) : Voice {
                     tts?.setOnUtteranceProgressListener(listener)
                     queued?.let { q ->
                         queued = null
-                        speak(q.text, q.onDone)
+                        speak(q.text, q.onStart, q.onDone)
                     }
                 } else {
                     available = false
@@ -72,27 +75,31 @@ class SpeechOut(context: Context, private val settings: Settings) : Voice {
         }
     }
 
-    override fun speak(raw: String, onDone: () -> Unit) {
+    override fun speak(raw: String, onDone: () -> Unit) = speak(raw, {}, onDone)
+
+    override fun speak(raw: String, onStart: () -> Unit, onDone: () -> Unit) {
         val text = TextClean.forSpeech(raw)
         if (text.isBlank() || !available) {
-            main.post { onDone() }
+            main.post { onStart(); onDone() }
             return
         }
         if (!ready) {
-            queued = Pending(text, onDone)
+            queued = Pending(text, onStart, onDone)
             return
         }
         val engine = tts
         if (engine == null) {
-            main.post { onDone() }
+            main.post { onStart(); onDone() }
             return
         }
         callbacks.clear()
+        starts.clear()
         setLocale(engine, text)
         requestFocus()
         val parts = chunk(text)
         parts.forEachIndexed { i, part ->
             val id = "u${++counter}"
+            if (i == 0) starts[id] = onStart
             if (i == parts.lastIndex) callbacks[id] = onDone
             val result = engine.speak(
                 part,
@@ -103,7 +110,7 @@ class SpeechOut(context: Context, private val settings: Settings) : Voice {
             if (result == TextToSpeech.ERROR) {
                 abandonFocus()
                 callbacks.clear()
-                main.post { onDone() }
+                main.post { onStart(); onDone() }
                 return
             }
         }
@@ -111,6 +118,7 @@ class SpeechOut(context: Context, private val settings: Settings) : Voice {
 
     override fun stop() {
         callbacks.clear()
+        starts.clear()
         queued = null
         tts?.stop()
         abandonFocus()

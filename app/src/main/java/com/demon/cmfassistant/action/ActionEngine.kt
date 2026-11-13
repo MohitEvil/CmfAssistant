@@ -30,7 +30,8 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 sealed interface ActionResult {
-    data class Success(val message: String) : ActionResult
+    /** [launch], when set, still has to run: the caller starts it as the spoken reply begins, so voice and action line up. */
+    data class Success(val message: String, val launch: (() -> Unit)? = null) : ActionResult
     data class Failure(val message: String) : ActionResult
 
     /** Needs a yes / no from the user before running [command]. */
@@ -230,13 +231,13 @@ class ActionEngine(context: Context) {
         val intent = Intent(Intent.ACTION_MAIN)
             .addCategory(Intent.CATEGORY_LAUNCHER)
             .setClassName(ri.activityInfo.packageName, ri.activityInfo.name)
-        return if (launch(intent)) ActionResult.Success("Opening $label.") else ActionResult.Failure("Couldn't open $label")
+        return ActionResult.Success("Opening $label.") { launch(intent) }
     }
 
     private fun launchPackage(pkg: String, label: String): ActionResult {
         val intent = app.packageManager.getLaunchIntentForPackage(pkg)
             ?: return ActionResult.Failure("Couldn't open $label")
-        return if (launch(intent)) ActionResult.Success("Opening $label.") else ActionResult.Failure("Couldn't open $label")
+        return ActionResult.Success("Opening $label.") { launch(intent) }
     }
 
     /** 1.0 = identical, 0.0 = nothing in common (edit distance relative to the longer word). */
