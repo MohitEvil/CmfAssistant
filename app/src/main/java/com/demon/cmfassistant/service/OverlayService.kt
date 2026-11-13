@@ -160,6 +160,8 @@ class OverlayService : Service() {
     }
 
     private fun openAssistant() {
+        // Tapping the bubble while the panel is showing closes it and stops listening; tapping again reopens it.
+        if (PanelActivity.closeIfOpen()) return
         startActivity(
             Intent(this, PanelActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)

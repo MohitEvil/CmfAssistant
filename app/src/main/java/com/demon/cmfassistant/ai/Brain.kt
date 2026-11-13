@@ -27,7 +27,7 @@ class Brain(private val settings: Settings) {
     private class Reply(val code: Int, val body: String)
 
     fun configured(): Boolean =
-        settings.aiKey.isNotBlank() && settings.aiModel.isNotBlank() && settings.aiBaseUrl.isNotBlank()
+        settings.aiEnabled && settings.aiKey.isNotBlank() && settings.aiModel.isNotBlank() && settings.aiBaseUrl.isNotBlank()
 
     suspend fun ask(history: List<Turn>, userText: String): Result<String> = withContext(Dispatchers.IO) {
         try {
@@ -158,24 +158,63 @@ class Brain(private val settings: Settings) {
         return body
     }
 
-    /** Turns thinking on or off for providers that support it. Others ignore this. */
+    /** Turns thinking on or off. Each provider spells this differently, so cover the common ones by host and by model name. */
     private fun addThinkingParams(body: JSONObject, thinking: Boolean) {
         val host = settings.aiBaseUrl.lowercase()
         val model = settings.aiModel.lowercase()
         when {
             host.contains("generativelanguage.googleapis.com") ->
-                body.put("reasoning_effort", if (thinking) "medium" else "none")
+                body.put(
+                    "reasoning_effort",
+                    when {
+                        thinking -> "medium"
+                        model.contains("2.5-pro") || model.contains("gemini-3") -> "low" // these cannot be fully switched off
+                        else -> "none"
+                    }
+                )
             host.contains("groq.com") -> when {
                 model.contains("gpt-oss") -> body.put("reasoning_effort", if (thinking) "medium" else "low")
                 model.contains("qwen3") -> body.put("reasoning_effort", if (thinking) "default" else "none")
             }
-            host.contains("openrouter.ai") ->
-                if (!thinking) body.put("reasoning", JSONObject().put("enabled", false))
+            host.contains("openrouter.ai") -> {
+                body.put("reasoning", JSONObject().put("enabled", thinking))
+                if (!thinking) body.put("include_reasoning", false)
+            }
             host.contains("openai.com") ->
                 if (model.startsWith("gpt-5") || model.startsWith("o1") || model.startsWith("o3") || model.startsWith("o4")) {
-                    body.put("reasoning_effort", if (thinking) "medium" else "minimal")
+                    body.put("reasoning_effort", if (thinking) "medium" else if (model.startsWith("gpt-5")) "minimal" else "low")
                 }
+            host.contains("deepseek.com") ->
+                body.put("thinking", JSONObject().put("type", if (thinking) "enabled" else "disabled"))
+            host.contains("x.ai") ->
+                if (model.contains("mini")) body.put("reasoning_effort", if (thinking) "high" else "low")
+            host.contains("dashscope") || host.contains("aliyun") ->
+                body.put("enable_thinking", thinking)
+            host.contains("nvidia.com") ->
+                body.put("chat_template_kwargs", JSONObject().put("thinking", thinking).put("enable_thinking", thinking))
+            host.contains("11434") || host.contains("ollama") || host.contains("localhost") ->
+                body.put("think", thinking)
         }
+        if (!thinking && !body.has("reasoning_effort") && !body.has("thinking") && !body.has("reasoning")) {
+            // Gateways and custom addresses: decide by model family.
+            when {
+                model.contains("qwen") || model.contains("qwq") -> {
+                    body.put("enable_thinking", false)
+                    body.put("chat_template_kwargs", JSONObject().put("enable_thinking", false))
+                }
+                model.contains("deepseek") || model.contains("glm") || model.contains("kimi") ->
+                    body.put("thinking", JSONObject().put("type", "disabled"))
+                model.contains("gpt-oss") -> body.put("reasoning_effort", "low")
+                model.contains("gemini-2.5-flash") -> body.put("reasoning_effort", "none")
+            }
+        }
+    }
+
+    /** Models that reason no matter what is sent. Used to warn the user. */
+    fun alwaysThinks(): Boolean {
+        val m = settings.aiModel.lowercase()
+        return m.contains("reasoner") || m.contains("-r1") || m.startsWith("o1") || m.startsWith("o3") || m.startsWith("o4") ||
+            m.contains("thinking") || m.contains("2.5-pro") || m.contains("gemini-3") || m.contains("qwq") || m.contains("gpt-oss")
     }
 
     private fun post(url: String, body: JSONObject, anthropic: Boolean): Reply {

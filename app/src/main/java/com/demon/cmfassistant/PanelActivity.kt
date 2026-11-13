@@ -40,8 +40,24 @@ class PanelActivity : ComponentActivity() {
     /** True while we are handing the conversation to the full app, so leaving doesn't cancel it. */
     private var handOff = false
 
+    companion object {
+        @Volatile
+        var current: PanelActivity? = null
+            private set
+
+        /** The floating bubble was tapped while the panel is open: stop listening and close it. Returns true if it closed one. */
+        fun closeIfOpen(): Boolean {
+            val p = current ?: return false
+            if (p.isFinishing || p.isDestroyed) return false
+            p.controller.cancel()
+            p.finish()
+            return true
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        current = this
         enableEdgeToEdge()
         setContent { Root() }
     }
@@ -50,6 +66,11 @@ class PanelActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         autoStart = true
+    }
+
+    override fun onDestroy() {
+        if (current === this) current = null
+        super.onDestroy()
     }
 
     override fun onStop() {

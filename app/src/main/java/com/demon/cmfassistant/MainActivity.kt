@@ -176,6 +176,7 @@ class MainActivity : ComponentActivity() {
                 palette = palette,
                 onTestAi = controller::testAi,
                 onFetchModels = controller::fetchModels,
+                alwaysThinks = controller.modelAlwaysThinks(),
                 onOpenPersona = { showPersona = true },
                 onClose = { showAi = false }
             )

@@ -53,20 +53,22 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".PanelActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@style/Theme.CmfAssistant.Panel"
+            android:windowSoftInputMode="adjustResize">
+            <!-- Power button / corner swipe as the default assistant: open the small panel and listen, like Gemini. -->
             <intent-filter>
                 <action android:name="android.intent.action.ASSIST" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
-
-        <activity
-            android:name=".PanelActivity"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:launchMode="singleTask"
-            android:taskAffinity=""
-            android:theme="@style/Theme.CmfAssistant.Panel"
-            android:windowSoftInputMode="adjustResize" />
 
         <service
             android:name=".service.OverlayService"

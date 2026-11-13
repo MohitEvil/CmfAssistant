@@ -117,6 +117,10 @@ class Settings(context: Context) {
     var voiceSpeed by mutableStateOf(sp.getFloat("voice_speed", 1.15f))
         private set
 
+    // Master switch for AI chat
+    var aiEnabled by mutableStateOf(sp.getBoolean("ai_enabled", true))
+        private set
+
     // AI thinking mode (off = faster replies)
     var aiThinking by mutableStateOf(sp.getBoolean("ai_thinking", false))
         private set
@@ -134,6 +138,9 @@ class Settings(context: Context) {
         voiceSid = sid
         sp.edit().putString("voice_model", id).putInt("voice_sid", sid).apply()
     }
+    @JvmName("applyAiEnabled")
+    fun setAiEnabled(v: Boolean) { aiEnabled = v; sp.edit().putBoolean("ai_enabled", v).apply() }
+
     @JvmName("applyAiThinking")
     fun setAiThinking(v: Boolean) { aiThinking = v; sp.edit().putBoolean("ai_thinking", v).apply() }
 

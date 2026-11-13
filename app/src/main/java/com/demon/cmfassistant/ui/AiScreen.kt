@@ -15,6 +15,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -46,6 +51,7 @@ fun AiScreen(
     palette: GlyphPalette,
     onTestAi: suspend (String) -> String,
     onFetchModels: suspend () -> Result<List<String>>,
+    alwaysThinks: Boolean,
     onOpenPersona: () -> Unit,
     onClose: () -> Unit
 ) {
@@ -56,6 +62,7 @@ fun AiScreen(
     var fetching by remember { mutableStateOf(false) }
     var fetchNote by remember { mutableStateOf("") }
     var models by remember { mutableStateOf<List<String>>(emptyList()) }
+    var filter by remember { mutableStateOf("") }
 
     Column(
         Modifier
@@ -78,7 +85,26 @@ fun AiScreen(
             )
         }
         Spacer(Modifier.height(20.dp))
-        DotText("AI CHAT", palette.fg, palette.dim.copy(alpha = 0.45f), 4.dp)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            DotText("AI CHAT", palette.fg, palette.dim.copy(alpha = 0.45f), 4.dp)
+            Spacer(Modifier.weight(1f))
+            Switch(
+                checked = settings.aiEnabled,
+                onCheckedChange = { settings.setAiEnabled(it) },
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = Color.White,
+                    checkedTrackColor = palette.red,
+                    checkedBorderColor = Color.Transparent,
+                    uncheckedThumbColor = palette.muted,
+                    uncheckedTrackColor = palette.dim,
+                    uncheckedBorderColor = Color.Transparent
+                )
+            )
+        }
+        Text(
+            if (settings.aiEnabled) "ON" else "OFF. THE ASSISTANT WON'T USE AI.",
+            color = palette.muted, fontFamily = mono, fontSize = 10.sp, letterSpacing = 1.sp
+        )
         Spacer(Modifier.height(20.dp))
         Text(
             "Add your own API key so the assistant can answer questions and chat in English, Hindi or Hinglish. " +
@@ -136,6 +162,7 @@ fun AiScreen(
                                         val r = onFetchModels()
                                         r.onSuccess {
                                             models = it
+                                            filter = ""
                                             fetchNote = "${it.size} MODELS FOUND. TAP ONE."
                                         }.onFailure {
                                             models = emptyList()
@@ -157,19 +184,51 @@ fun AiScreen(
 
         if (models.isNotEmpty()) {
             Spacer(Modifier.height(12.dp))
+            val shown = if (filter.isBlank()) models else models.filter { it.contains(filter.trim(), ignoreCase = true) }
             Card(palette) {
-                models.take(80).forEachIndexed { i, id ->
-                    if (i > 0) Divider(palette)
-                    val picked = id == settings.aiModel.trim()
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { settings.setAiModel(id) }
-                            .padding(horizontal = 18.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(id, color = if (picked) palette.fg else palette.muted, fontFamily = mono, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                        if (picked) Text("●", color = palette.red, fontSize = 12.sp)
+                Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        BasicTextField(
+                            value = filter,
+                            onValueChange = { filter = it },
+                            singleLine = true,
+                            textStyle = TextStyle(color = palette.fg, fontSize = 12.sp, fontFamily = mono),
+                            cursorBrush = SolidColor(palette.red),
+                            decorationBox = { inner ->
+                                if (filter.isEmpty()) Text("filter…", color = palette.muted, fontFamily = mono, fontSize = 12.sp)
+                                inner()
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(palette.bg, RoundedCornerShape(10.dp))
+                                .border(BorderStroke(1.dp, palette.dim), RoundedCornerShape(10.dp))
+                                .padding(horizontal = 10.dp, vertical = 7.dp)
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text("${shown.size}/${models.size}", color = palette.muted, fontFamily = mono, fontSize = 10.sp, letterSpacing = 1.sp)
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    LazyColumn(Modifier.fillMaxWidth().height(260.dp)) {
+                        items(shown, key = { it }) { id ->
+                            val picked = id == settings.aiModel.trim()
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable { settings.setAiModel(id) }
+                                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    id,
+                                    color = if (picked) palette.fg else palette.muted,
+                                    fontFamily = mono,
+                                    fontSize = 12.sp,
+                                    maxLines = 1,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (picked) Text("●", color = palette.red, fontSize = 10.sp)
+                            }
+                        }
                     }
                 }
             }
@@ -179,7 +238,8 @@ fun AiScreen(
         Card(palette) {
             ToggleRow(
                 "Thinking mode",
-                "Lets the AI reason before answering. Smarter on hard questions, but slower. Off is faster.",
+                "Lets the AI reason before answering. Smarter on hard questions, but slower. Off is faster." +
+                    if (!settings.aiThinking && alwaysThinks) " This model reasons anyway. Pick a faster one for quicker answers." else "",
                 settings.aiThinking,
                 palette
             ) { settings.setAiThinking(it) }

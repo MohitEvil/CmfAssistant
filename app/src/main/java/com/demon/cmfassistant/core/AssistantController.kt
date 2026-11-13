@@ -21,6 +21,7 @@ import com.demon.cmfassistant.feedback.HapticController
 import com.demon.cmfassistant.intent.Affirmation
 import com.demon.cmfassistant.intent.Command
 import com.demon.cmfassistant.intent.IntentEngine
+import com.demon.cmfassistant.intent.Wrapup
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -72,6 +73,8 @@ class AssistantController(private val context: Context, val settings: Settings) 
     private var lastRmsAt = 0L
     private var engineRetries = 0
     private var lastActive = 0L
+    /** True right after "anything else?", so a bare yes / no / stop is read as an answer to it. */
+    private var awaitingMore = false
 
     private val history = ArrayList<Turn>()
 
@@ -203,7 +206,10 @@ class AssistantController(private val context: Context, val settings: Settings) 
     /** Used by the Test buttons in Settings: asks the AI one thing and returns its answer or the error. */
     suspend fun fetchModels(): Result<List<String>> = brain.fetchModels()
 
+    fun modelAlwaysThinks(): Boolean = brain.alwaysThinks()
+
     suspend fun testAi(prompt: String): String {
+        if (!settings.aiEnabled) return "AI chat is switched off."
         if (!brain.configured()) return "Add an API key first."
         val result = brain.ask(emptyList(), prompt)
         return result.getOrNull() ?: (result.exceptionOrNull()?.message ?: "No answer.")
@@ -274,7 +280,43 @@ class AssistantController(private val context: Context, val settings: Settings) 
 
     // ---- Understanding and doing ----
 
-    private fun process(text: String) {
+    private fun process(raw: String) {
+        val awaiting = awaitingMore
+        awaitingMore = false
+        when (val w = Wrapup.classify(raw, awaiting)) {
+            Wrapup.Result.Dismiss -> { closeConversation(); return }
+            Wrapup.Result.Yes -> { beginListening(Mode.FOLLOWUP); return }
+            Wrapup.Result.Thanks -> { thanksReply(raw); return }
+            is Wrapup.Result.Rest -> runCommand(w.text)
+        }
+    }
+
+    /** "No", "that's all", "stop listening", "close": stop the mic and close the panel. */
+    private fun closeConversation() {
+        stopEverything()
+        haptics.veryLightTap()
+        transition(AssistantState.IDLE, "", "")
+    }
+
+    /** "Thanks": answer politely, ask if there is more, and listen for the answer. */
+    private fun thanksReply(heard: String) {
+        val reply = Wrapup.welcome.random() + " " + Wrapup.askMore.random()
+        val token = ++flow
+        transition(AssistantState.SPEAKING, "", heard, reply = reply)
+        haptics.veryLightTap()
+        say(reply) { if (token == flow) listenForMore() }
+    }
+
+    private fun listenForMore() {
+        if (hasMicPermission()) {
+            awaitingMore = true
+            beginListening(Mode.FOLLOWUP)
+        } else {
+            endQuiet()
+        }
+    }
+
+    private fun runCommand(text: String) {
         workJob?.cancel()
         flow++
         lastActive = SystemClock.uptimeMillis()
@@ -294,7 +336,8 @@ class AssistantController(private val context: Context, val settings: Settings) 
         when (val result = actions.run(cmd)) {
             is ActionResult.Success -> {
                 val launch = result.launch
-                if (launch == null) success(result.message, text) else successLaunching(result.message, text, launch)
+                if (launch == null) success(result.message, text, askMore = !opensAnotherApp(cmd))
+                else successLaunching(result.message, text, launch)
             }
             is ActionResult.Failure -> fail(result.message, text)
             is ActionResult.Confirm -> askConfirm(
@@ -365,7 +408,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         when {
             small != null -> respond(text, small)
             question -> execute(Command.Search(text), text)
-            else -> fail("I can't do that yet. Add an AI key in Settings so I can chat.", text)
+            else -> fail(if (settings.aiEnabled) "I can't do that yet. Add an AI key in Settings so I can chat." else "I can't do that yet. AI chat is switched off.", text)
         }
     }
 
@@ -458,10 +501,27 @@ class AssistantController(private val context: Context, val settings: Settings) 
 
     // ---- Results ----
 
-    private fun success(message: String, transcript: String) {
-        flow++
+    /** Commands that put another app in front, where the mic can't keep listening. */
+    private fun opensAnotherApp(c: Command) = c is Command.Search || c is Command.Navigate || c is Command.Call ||
+        c is Command.ComposeSms || c === Command.Camera || c is Command.OpenSettings || c is Command.OpenSetting ||
+        c is Command.OpenUrl || c is Command.Email || c is Command.AddEvent || c === Command.Wallpaper ||
+        c === Command.ShowAlarms || c is Command.OpenApp || c is Command.LaunchPackage
+
+    private fun success(message: String, transcript: String, askMore: Boolean = false) {
+        val token = ++flow
         transition(AssistantState.SUCCESS, message, transcript)
         haptics.success()
+        if (askMore && settings.followUp && settings.speakReplies && voice.available && hasMicPermission()) {
+            // Say what was done, then ask if there is anything else, then listen.
+            voice.speak(message) {
+                if (token != flow) return@speak
+                val question = Wrapup.askMore.random()
+                val t2 = ++flow
+                transition(AssistantState.SPEAKING, "", transcript, reply = question)
+                voice.speak(question) { if (t2 == flow) listenForMore() }
+            }
+            return
+        }
         speakStatus(message)
         scheduleIdle(1800)
     }
@@ -535,7 +595,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
     private fun prewarmVoice() {
         val model = voice.selectedModel()
         val apps = actions.appLabels().take(if (model?.heavy == true) 100 else 60).map { "Opening $it." }
-        voice.prewarm(VoiceCatalog.staticPhrases + apps)
+        voice.prewarm(VoiceCatalog.staticPhrases + Wrapup.askMore + Wrapup.welcome + apps)
     }
 
     private fun transition(
