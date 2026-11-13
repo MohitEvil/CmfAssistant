@@ -82,6 +82,8 @@ class MainActivity : ComponentActivity() {
         var showSettings by remember { mutableStateOf(false) }
         var showPersona by remember { mutableStateOf(false) }
         var showVoice by remember { mutableStateOf(false) }
+        var showAi by remember { mutableStateOf(false) }
+        var showAccess by remember { mutableStateOf(false) }
         var showLog by remember { mutableStateOf(false) }
 
         val dark = when (settings.theme) {
@@ -104,6 +106,7 @@ class MainActivity : ComponentActivity() {
         }
         val contactsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
         val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+        val anyPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
         // First launch: ask for notifications (needed to show the bubble service) once.
         LaunchedEffect(Unit) {
@@ -136,11 +139,13 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        BackHandler(enabled = showLog || showSettings || showPersona || showVoice || ui.state != AssistantState.IDLE) {
+        BackHandler(enabled = showLog || showAi || showAccess || showSettings || showPersona || showVoice || ui.state != AssistantState.IDLE) {
             when {
                 showLog -> showLog = false
                 showVoice -> showVoice = false
+                showAccess -> showAccess = false
                 showPersona -> showPersona = false
+                showAi -> showAi = false
                 showSettings -> showSettings = false
                 else -> controller.cancel()
             }
@@ -148,13 +153,13 @@ class MainActivity : ComponentActivity() {
 
         if (showLog) {
             LogScreen(palette = palette, onClose = { showLog = false })
-        } else if (showVoice) {
-            VoiceScreen(
-                settings = settings,
-                voice = controller.voice,
+        } else if (showAccess) {
+            AccessScreen(
+                system = controller.actions.system,
                 palette = palette,
-                onOpenLog = { showLog = true },
-                onClose = { showVoice = false }
+                onRequestPermission = { anyPermLauncher.launch(it) },
+                onOpenIntent = { runCatching { startActivity(it) } },
+                onClose = { showAccess = false }
             )
         } else if (showPersona) {
             PersonaScreen(
@@ -162,6 +167,23 @@ class MainActivity : ComponentActivity() {
                 palette = palette,
                 onTestAi = controller::testAi,
                 onClose = { showPersona = false }
+            )
+        } else if (showAi) {
+            AiScreen(
+                settings = settings,
+                palette = palette,
+                onTestAi = controller::testAi,
+                onFetchModels = controller::fetchModels,
+                onOpenPersona = { showPersona = true },
+                onClose = { showAi = false }
+            )
+        } else if (showVoice) {
+            VoiceScreen(
+                settings = settings,
+                voice = controller.voice,
+                palette = palette,
+                onOpenLog = { showLog = true },
+                onClose = { showVoice = false }
             )
         } else if (showSettings) {
             SettingsScreen(
@@ -194,8 +216,8 @@ class MainActivity : ComponentActivity() {
                         )
                     )
                 },
-                onTestAi = controller::testAi,
-                onOpenPersona = { showPersona = true },
+                onOpenAi = { showAi = true },
+                onOpenAccess = { showAccess = true },
                 onOpenVoice = { showVoice = true },
                 onOpenLog = { showLog = true },
                 onClose = { showSettings = false }

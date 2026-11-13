@@ -65,6 +65,9 @@ object IntentEngine {
             return Command.Flashlight(on)
         }
 
+        // Phone controls: brightness, rotation, DND, ringer, settings pages, notifications and more
+        SystemIntents.parse(s, l)?.let { return it }
+
         // Timer
         if (l.contains("half an hour") && l.contains("timer")) return Command.SetTimer(1800)
         (timerAfter.find(l) ?: timerBefore.find(l))?.let { m ->

@@ -28,3 +28,7 @@ Or in Android Studio: open the folder and press Run.
   - **Zani (your voice):** Kyutai Pocket TTS cloned from your voice samples (main) plus three moods (soft, serious, amused). English only.
   - **Hinglish:** use the HINGLISH persona so replies mix Devanagari Hindi with English words. Supertonic speaks Devanagari as Hindi and Latin text as English.
   - **Not included:** "Phonon 31M" is by Gradium (not Google) and ships as a GGUF for Gradium's own Rust runtime, not MediaPipe/LiteRT, so it can't run in this app today.
+
+
+## Phone control
+See [CAPABILITIES.md](CAPABILITIES.md). AI chat settings now live on their own page (Settings → AI chat), with a FETCH button that lists the provider's models.

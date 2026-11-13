@@ -46,7 +46,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val haptics = HapticController(context, settings)
-    private val actions = ActionEngine(context)
+    val actions = ActionEngine(context)
     /** Offline neural voice, with the device voice as a fallback. Also used by the Voice settings screen. */
     val voice = VoiceHub(context, settings)
     private val brain = Brain(settings)
@@ -201,6 +201,8 @@ class AssistantController(private val context: Context, val settings: Settings) 
     }
 
     /** Used by the Test buttons in Settings: asks the AI one thing and returns its answer or the error. */
+    suspend fun fetchModels(): Result<List<String>> = brain.fetchModels()
+
     suspend fun testAi(prompt: String): String {
         if (!brain.configured()) return "Add an API key first."
         val result = brain.ask(emptyList(), prompt)
@@ -326,6 +328,17 @@ class AssistantController(private val context: Context, val settings: Settings) 
                     text
                 )
             }
+            is ContactLookup.Fuzzy -> askConfirm(
+                PendingConfirm(
+                    title = "Message ${r.contact.name}?",
+                    detail = "I couldn't find “${cmd.recipient}”. Closest match is ${r.contact.name}.",
+                    spoken = "Do you mean ${r.contact.name}?",
+                    command = Command.SendSms(r.contact.name, cmd.body),
+                    declineMessage = "Okay. I won't message anyone.",
+                    declineAsFailure = false
+                ),
+                text
+            )
             ContactLookup.NoPermission -> fail("Allow Contacts access to message by name.", text)
             ContactLookup.NotFound -> fail("I couldn't find “${cmd.recipient}” in your contacts.", text)
         }
@@ -426,7 +439,10 @@ class AssistantController(private val context: Context, val settings: Settings) 
         workJob?.cancel()
         flow++
         val text = _ui.value.transcript
-        workJob = scope.launch { execute(pending.command, text) }
+        workJob = scope.launch {
+            val c = pending.command
+            if (c is Command.SendSms) prepareSms(c, text) else execute(c, text)
+        }
     }
 
     private fun decline(pending: PendingConfirm) {

@@ -19,6 +19,7 @@ import android.provider.MediaStore
 import android.provider.Settings
 import android.view.KeyEvent
 import androidx.core.content.ContextCompat
+import com.demon.cmfassistant.intent.AppOp
 import com.demon.cmfassistant.intent.Command
 import com.demon.cmfassistant.intent.MediaKey
 import com.demon.cmfassistant.intent.SettingsPage
@@ -51,6 +52,9 @@ sealed interface ContactLookup {
     data class Found(val contact: Contact) : ContactLookup
     data object NoPermission : ContactLookup
     data object NotFound : ContactLookup
+
+    /** No exact match, but this contact is spelled similarly. Ask before using it. */
+    data class Fuzzy(val contact: Contact) : ContactLookup
 }
 
 /** Runs commands through ordinary Android APIs and intents. No root, no special access. */
@@ -59,6 +63,8 @@ class ActionEngine(context: Context) {
     private val app = context.applicationContext
     private val cameraManager = app.getSystemService(CameraManager::class.java)
     private val audio = app.getSystemService(AudioManager::class.java)
+
+    val system = SystemActions(app)
 
     private var torchOn = false
 
@@ -92,7 +98,25 @@ class ActionEngine(context: Context) {
         is Command.Call -> call(cmd.target)
         is Command.ComposeSms -> composeSms(cmd)
         is Command.SendSms -> ActionResult.Failure("That message needs your confirmation first.")
-        is Command.Volume -> volume(cmd)
+        is Command.Volume -> if (cmd.stream == com.demon.cmfassistant.intent.VolStream.MEDIA) volume(cmd) else system.streamVolume(cmd)
+        is Command.OpenSetting -> openNamedSetting(cmd.name)
+        is Command.Brightness -> system.brightness(cmd)
+        is Command.Rotation -> system.rotation(cmd.auto)
+        is Command.ScreenTimeout -> system.screenTimeout(cmd.seconds)
+        is Command.Dnd -> system.dnd(cmd.on)
+        is Command.Ringer -> system.ringer(cmd.mode)
+        Command.LockScreen -> system.lock()
+        is Command.Notifications -> system.notifications(cmd.clear)
+        Command.Agenda -> system.agenda()
+        is Command.AddEvent -> system.addEvent(cmd.title)
+        is Command.Email -> system.email(cmd.to, cmd.body)
+        is Command.OpenUrl -> system.openUrl(cmd.url)
+        Command.Wallpaper -> system.wallpaper()
+        is Command.Status -> system.status(cmd.kind)
+        is Command.AppAction -> appAction(cmd)
+        is Command.CopyText -> system.copy(cmd.text)
+        Command.ReadClipboard -> system.readClipboard()
+        Command.ShowAlarms -> system.showAlarms()
         is Command.Media -> media(cmd.key)
         is Command.Search -> search(cmd.query)
         is Command.Navigate -> navigate(cmd.place)
@@ -108,6 +132,80 @@ class ActionEngine(context: Context) {
             ActionResult.Failure("No camera app found")
         }
         is Command.Question, is Command.Unknown -> ActionResult.Failure("I can't do that yet.")
+    }
+
+    // ---- Settings pages and app actions, with "did you mean" confirmation ----
+
+    private fun openNamedSetting(name: String): ActionResult {
+        SettingsTable.exact(name)?.let { return system.openSetting(it) }
+        val close = SettingsTable.fuzzy(name)
+            ?: return ActionResult.Failure("I don't know a settings page called $name.")
+        return ActionResult.Confirm(
+            title = "Open ${close.label}?",
+            detail = "I couldn't find “$name”. Closest match is ${close.label}.",
+            spoken = "Do you mean ${close.label} settings?",
+            command = Command.OpenSetting(close.key),
+            declineMessage = "Okay. I won't open anything."
+        )
+    }
+
+    private data class AppHit(val pkg: String, val label: String, val exact: Boolean)
+
+    /** Best installed app for [name]: an exact/prefix match, otherwise a similar-sounding one, otherwise null. */
+    private fun findApp(name: String): AppHit? {
+        val pm = app.packageManager
+        val q = alias(norm(name))
+        if (q.isEmpty()) return null
+        val apps = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
+        var best: ResolveInfo? = null
+        var bestScore = 0
+        for (ri in apps) {
+            val label = norm(ri.loadLabel(pm).toString())
+            val score = when {
+                label == q -> 100
+                label.startsWith(q) -> 80
+                label.length >= 3 && q.startsWith(label) -> 70
+                label.contains(q) -> 60
+                else -> 0
+            }
+            if (score > bestScore) { best = ri; bestScore = score }
+        }
+        if (best != null) return AppHit(best.activityInfo.packageName, best.loadLabel(pm).toString(), true)
+        if (q.length < 4) return null
+        var close: ResolveInfo? = null
+        var closeScore = 0.0
+        for (ri in apps) {
+            val full = ri.loadLabel(pm).toString()
+            val candidates = listOf(norm(full)) + full.split(Regex("[^A-Za-z0-9]+")).map { norm(it) }.filter { it.length >= 4 }
+            val sim = candidates.maxOf { similarity(q, it) }
+            if (sim > closeScore) { close = ri; closeScore = sim }
+        }
+        return if (close != null && closeScore >= 0.68) AppHit(close.activityInfo.packageName, close.loadLabel(pm).toString(), false) else null
+    }
+
+    private fun appAction(c: Command.AppAction): ActionResult {
+        val hit: AppHit = if (c.pkg != null) {
+            AppHit(c.pkg, runCatching { app.packageManager.getApplicationLabel(app.packageManager.getApplicationInfo(c.pkg, 0)).toString() }.getOrDefault(c.name), true)
+        } else {
+            findApp(c.name) ?: return ActionResult.Failure("I couldn't find an app called ${c.name}.")
+        }
+        if (!hit.exact) {
+            return ActionResult.Confirm(
+                title = (if (c.op == AppOp.UNINSTALL) "Uninstall " else "Show info for ") + hit.label + "?",
+                detail = "I couldn't find “${c.name}”. Closest match is ${hit.label}.",
+                spoken = "Do you mean ${hit.label}?",
+                command = c.copy(pkg = hit.pkg),
+                declineMessage = "Okay. I won't touch it."
+            )
+        }
+        return when (c.op) {
+            AppOp.INFO -> ActionResult.Success("Here's the info for ${hit.label}.") {
+                launch(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${hit.pkg}")))
+            }
+            AppOp.UNINSTALL -> ActionResult.Success("Opening the uninstall prompt for ${hit.label}. Confirm it there.") {
+                launch(Intent(Intent.ACTION_DELETE, Uri.parse("package:${hit.pkg}")))
+            }
+        }
     }
 
     // ---- Contacts (used by calls and by the message confirmation card) ----
@@ -150,7 +248,33 @@ class ActionEngine(context: Context) {
                 }
             }
         }
-        return best?.let { ContactLookup.Found(it) } ?: ContactLookup.NotFound
+        best?.let { return ContactLookup.Found(it) }
+        return fuzzyContact(q)
+    }
+
+    /** Looks at every contact and returns the one whose name is spelled most like [q], if it is close enough. */
+    private fun fuzzyContact(q: String): ContactLookup {
+        val nq = norm(q)
+        if (nq.length < 3) return ContactLookup.NotFound
+        var best: Contact? = null
+        var score = 0.0
+        runCatching {
+            app.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
+                null, null, null
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val name = c.getString(0) ?: continue
+                    val number = c.getString(1) ?: continue
+                    val parts = listOf(norm(name)) + name.split(Regex("\\s+")).map { norm(it) }.filter { it.length >= 3 }
+                    val sim = parts.maxOf { similarity(nq, it) }
+                    if (sim > score) { score = sim; best = Contact(name, number) }
+                }
+            }
+        }
+        val b = best
+        return if (b != null && score >= 0.7) ContactLookup.Fuzzy(b) else ContactLookup.NotFound
     }
 
     // ---- Individual actions ----
@@ -314,6 +438,13 @@ class ActionEngine(context: Context) {
                 val intent = Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", r.contact.number, null))
                 if (launch(intent)) ActionResult.Success(pick("Calling ${r.contact.name}.", "Dialing ${r.contact.name}.")) else ActionResult.Failure("No dialer found")
             }
+            is ContactLookup.Fuzzy -> ActionResult.Confirm(
+                title = "Call ${r.contact.name}?",
+                detail = "I couldn't find “$target”. Closest match is ${r.contact.name}.",
+                spoken = "Do you mean ${r.contact.name}?",
+                command = Command.Call(r.contact.name),
+                declineMessage = "Okay. I won't call anyone."
+            )
             ContactLookup.NoPermission -> ActionResult.Failure("Allow Contacts access to call by name")
             ContactLookup.NotFound -> ActionResult.Failure("I couldn't find “$target” in your contacts")
         }

@@ -51,6 +51,55 @@ class Brain(private val settings: Settings) {
         }
     }
 
+    /** Asks the provider which models this key can use. Returns plain model ids, sorted. */
+    suspend fun fetchModels(): Result<List<String>> = withContext(Dispatchers.IO) {
+        try {
+            val base = settings.aiBaseUrl.trim().trimEnd('/')
+            if (base.isBlank()) throw BrainException("Fill in ADDRESS first.")
+            if (settings.aiKey.isBlank()) throw BrainException("Fill in API KEY first.")
+            val anthropic = settings.aiProvider == "anthropic" || base.contains("anthropic.com")
+            val conn = URL("$base/models" + if (anthropic) "?limit=100" else "").openConnection() as HttpURLConnection
+            val reply = try {
+                conn.requestMethod = "GET"
+                conn.connectTimeout = 15_000
+                conn.readTimeout = 25_000
+                if (anthropic) {
+                    conn.setRequestProperty("x-api-key", settings.aiKey.trim())
+                    conn.setRequestProperty("anthropic-version", "2023-06-01")
+                } else {
+                    conn.setRequestProperty("Authorization", "Bearer " + settings.aiKey.trim())
+                }
+                val code = conn.responseCode
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                Reply(code, stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty())
+            } finally {
+                conn.disconnect()
+            }
+            if (reply.code !in 200..299) throw BrainException(errorMessage(reply.code, reply.body))
+            val root = JSONObject(reply.body)
+            val arr = root.optJSONArray("data") ?: root.optJSONArray("models") ?: JSONArray()
+            val ids = ArrayList<String>()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i)
+                val id = (o?.optString("id").orEmpty().ifBlank { o?.optString("name").orEmpty() })
+                    .removePrefix("models/")
+                if (id.isNotBlank()) ids.add(id)
+            }
+            if (ids.isEmpty()) throw BrainException("No models came back from that address.")
+            Result.success(ids.distinct().sorted())
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: BrainException) {
+            Result.failure(e)
+        } catch (e: java.net.UnknownHostException) {
+            Result.failure(BrainException("No internet, or the address can't be found."))
+        } catch (e: java.net.SocketTimeoutException) {
+            Result.failure(BrainException("The provider took too long to answer."))
+        } catch (e: Exception) {
+            Result.failure(BrainException("Couldn't fetch models (${e.javaClass.simpleName})."))
+        }
+    }
+
     private fun call(history: List<Turn>, userText: String): String {
         val base = settings.aiBaseUrl.trim().trimEnd('/')
         val anthropic = settings.aiProvider == "anthropic" || base.contains("anthropic.com")

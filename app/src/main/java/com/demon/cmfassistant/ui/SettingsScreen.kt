@@ -52,8 +52,8 @@ fun SettingsScreen(
     perf: PerfMode,
     onBubbleToggle: (Boolean) -> Unit,
     onOpenAppPermissions: () -> Unit,
-    onTestAi: suspend (String) -> String,
-    onOpenPersona: () -> Unit,
+    onOpenAi: () -> Unit,
+    onOpenAccess: () -> Unit,
     onOpenVoice: () -> Unit,
     onOpenLog: () -> Unit,
     onClose: () -> Unit
@@ -155,10 +155,44 @@ fun SettingsScreen(
             }
         }
 
-        Spacer(Modifier.height(24.dp))
-        AiSection(settings, palette, onTestAi, onOpenPersona)
+        Spacer(Modifier.height(16.dp))
+        Card(palette) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenAi)
+                    .padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("AI chat", color = palette.fg, fontSize = 15.sp)
+                    Text(
+                        if (settings.aiKey.isBlank()) "Optional. Add a key, model and address" else "On · ${settings.aiModel}",
+                        color = palette.muted, fontSize = 12.sp
+                    )
+                }
+                Text("›", color = palette.muted, fontSize = 20.sp)
+            }
+        }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(16.dp))
+        Card(palette) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenAccess)
+                    .padding(horizontal = 18.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Phone control access", color = palette.fg, fontSize = 15.sp)
+                    Text("Grant what the assistant needs to control settings", color = palette.muted, fontSize = 12.sp)
+                }
+                Text("›", color = palette.muted, fontSize = 20.sp)
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
         Card(palette) {
             Row(
                 Modifier
@@ -227,7 +261,7 @@ internal fun SectionLabel(text: String, palette: GlyphPalette) {
 }
 
 @Composable
-private fun ToggleRow(
+internal fun ToggleRow(
     title: String,
     subtitle: String,
     checked: Boolean,
@@ -279,101 +313,8 @@ internal fun Chip(text: String, selected: Boolean, palette: GlyphPalette, onClic
     )
 }
 
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun AiSection(
-    settings: Settings,
-    palette: GlyphPalette,
-    onTestAi: suspend (String) -> String,
-    onOpenPersona: () -> Unit
-) {
-    val scope = rememberCoroutineScope()
-    var testing by remember { mutableStateOf(false) }
-    var testResult by remember { mutableStateOf("") }
-    SectionLabel("AI CHAT (OPTIONAL)", palette)
-    Text(
-        "Add your own API key so the assistant can answer questions and chat in English, Hindi or Hinglish. " +
-            "Without a key it still runs commands and makes small talk. Your key stays on this phone and is only sent to the provider you pick.",
-        color = palette.muted,
-        fontSize = 12.sp
-    )
-    Spacer(Modifier.height(12.dp))
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        AiPresets.all.forEach { p ->
-            Chip(p.name, settings.aiProvider == p.id, palette) { settings.setAiProvider(p.id) }
-        }
-    }
-    Spacer(Modifier.height(14.dp))
-    Card(palette) {
-        Column(Modifier.padding(horizontal = 18.dp, vertical = 14.dp)) {
-            Field("API KEY", settings.aiKey, palette, secret = true) { settings.setAiKey(it) }
-            Spacer(Modifier.height(14.dp))
-            Field("MODEL", settings.aiModel, palette) { settings.setAiModel(it) }
-            Spacer(Modifier.height(14.dp))
-            Field("ADDRESS", settings.aiBaseUrl, palette, keyboard = KeyboardType.Uri) { settings.setAiBaseUrl(it) }
-        }
-    }
-    Spacer(Modifier.height(12.dp))
-    Card(palette) {
-        ToggleRow(
-            "Thinking mode",
-            "Lets the AI reason before answering. Smarter on hard questions, but slower. Off is faster.",
-            settings.aiThinking,
-            palette
-        ) { settings.setAiThinking(it) }
-    }
-    Spacer(Modifier.height(8.dp))
-    Text(
-        if (settings.aiKey.isBlank()) "NO KEY SET. CHAT USES BASIC REPLIES." else "AI CHAT IS ON.",
-        color = palette.muted,
-        fontFamily = FontFamily.Monospace,
-        fontSize = 10.sp,
-        letterSpacing = 1.sp
-    )
-
-    if (settings.aiKey.isNotBlank()) {
-        Spacer(Modifier.height(14.dp))
-        PillButton(
-            text = if (testing) "TESTING…" else "TEST CONNECTION",
-            filled = false,
-            palette = palette,
-            onClick = {
-                if (!testing) {
-                    testing = true
-                    testResult = ""
-                    scope.launch {
-                        testResult = onTestAi("Say hello in five words.")
-                        testing = false
-                    }
-                }
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-        if (testResult.isNotBlank()) {
-            Spacer(Modifier.height(10.dp))
-            Text(testResult, color = palette.fg, fontSize = 13.sp)
-        }
-        Spacer(Modifier.height(14.dp))
-        Card(palette) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onOpenPersona)
-                    .padding(horizontal = 18.dp, vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text("Assistant persona", color = palette.fg, fontSize = 15.sp)
-                    Text("How the AI behaves and sounds", color = palette.muted, fontSize = 12.sp)
-                }
-                Text("›", color = palette.muted, fontSize = 20.sp)
-            }
-        }
-    }
-}
-
-@Composable
-private fun Field(
+internal fun Field(
     label: String,
     value: String,
     palette: GlyphPalette,

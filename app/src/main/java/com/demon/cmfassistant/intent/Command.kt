@@ -3,6 +3,11 @@ package com.demon.cmfassistant.intent
 enum class VolumeAction { UP, DOWN, MUTE, SET }
 enum class MediaKey { PLAY, PAUSE, NEXT, PREVIOUS }
 enum class SettingsPage { INTERNET, BLUETOOTH, GENERAL }
+enum class LevelAction { UP, DOWN, SET, AUTO }
+enum class VolStream { MEDIA, RING, ALARM, NOTIFICATION, CALL }
+enum class RingerMode { SILENT, VIBRATE, NORMAL }
+enum class StatusKind { STORAGE, RAM, NETWORK, WIFI, BLUETOOTH, AIRPLANE, DND, BRIGHTNESS }
+enum class AppOp { INFO, UNINSTALL }
 
 /** Everything the assistant knows how to do. */
 sealed class Command {
@@ -43,7 +48,7 @@ sealed class Command {
         override fun describe() = "Opening Messages…"
     }
 
-    data class Volume(val action: VolumeAction, val percent: Int = 0) : Command() {
+    data class Volume(val action: VolumeAction, val percent: Int = 0, val stream: VolStream = VolStream.MEDIA) : Command() {
         override fun describe() = "Adjusting volume…"
     }
 
@@ -82,6 +87,83 @@ sealed class Command {
     /** Opens an exact installed app (after the user said yes to "Do you mean ...?"). */
     data class LaunchPackage(val pkg: String, val label: String) : Command() {
         override fun describe() = "Opening $label…"
+    }
+
+    /** Opens any Settings page by name. [exact] is false when the name was only a close match the user confirmed. */
+    data class OpenSetting(val name: String) : Command() {
+        override fun describe() = "Opening settings…"
+    }
+
+    data class Brightness(val action: LevelAction, val percent: Int = 0) : Command() {
+        override fun describe() = "Adjusting brightness…"
+    }
+
+    /** auto == null means toggle. */
+    data class Rotation(val auto: Boolean?) : Command() {
+        override fun describe() = "Changing rotation…"
+    }
+
+    data class ScreenTimeout(val seconds: Int) : Command() {
+        override fun describe() = "Setting screen timeout…"
+    }
+
+    /** on == null means toggle. */
+    data class Dnd(val on: Boolean?) : Command() {
+        override fun describe() = "Changing Do Not Disturb…"
+    }
+
+    data class Ringer(val mode: RingerMode) : Command() {
+        override fun describe() = "Changing sound mode…"
+    }
+
+    data object LockScreen : Command() {
+        override fun describe() = "Locking the phone…"
+    }
+
+    /** clear == false reads them aloud, true dismisses them all. */
+    data class Notifications(val clear: Boolean) : Command() {
+        override fun describe() = "Checking notifications…"
+    }
+
+    data object Agenda : Command() {
+        override fun describe() = "Checking your calendar…"
+    }
+
+    data class AddEvent(val title: String) : Command() {
+        override fun describe() = "Opening calendar…"
+    }
+
+    data class Email(val to: String, val body: String) : Command() {
+        override fun describe() = "Opening email…"
+    }
+
+    data class OpenUrl(val url: String) : Command() {
+        override fun describe() = "Opening website…"
+    }
+
+    data object Wallpaper : Command() {
+        override fun describe() = "Opening wallpapers…"
+    }
+
+    data class Status(val kind: StatusKind) : Command() {
+        override fun describe() = "Checking…"
+    }
+
+    /** [pkg] is set once the user confirmed a close match. */
+    data class AppAction(val op: AppOp, val name: String, val pkg: String? = null) : Command() {
+        override fun describe() = "Finding $name…"
+    }
+
+    data class CopyText(val text: String) : Command() {
+        override fun describe() = "Copying…"
+    }
+
+    data object ReadClipboard : Command() {
+        override fun describe() = "Reading clipboard…"
+    }
+
+    data object ShowAlarms : Command() {
+        override fun describe() = "Opening alarms…"
     }
 
     /** A question or chat line that isn't a phone command. Answered by the AI, or searched on the web. */
