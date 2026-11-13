@@ -27,6 +27,8 @@ import com.demon.cmfassistant.core.AssistantController
 import com.demon.cmfassistant.data.Settings
 import com.demon.cmfassistant.data.ThemeMode
 import com.demon.cmfassistant.service.OverlayService
+import com.demon.cmfassistant.ui.AccessScreen
+import com.demon.cmfassistant.ui.AiScreen
 import com.demon.cmfassistant.ui.AssistantScreen
 import com.demon.cmfassistant.ui.DarkPalette
 import com.demon.cmfassistant.ui.LightPalette
