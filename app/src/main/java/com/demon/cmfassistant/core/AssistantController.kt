@@ -6,6 +6,8 @@ import android.content.pm.PackageManager
 import android.os.SystemClock
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.core.content.ContextCompat
+import com.demon.cmfassistant.MainActivity
+import com.demon.cmfassistant.PanelActivity
 import com.demon.cmfassistant.action.ActionEngine
 import com.demon.cmfassistant.action.ActionResult
 import com.demon.cmfassistant.action.ContactLookup
@@ -52,6 +54,10 @@ class AssistantController(private val context: Context, val settings: Settings) 
     val voice = VoiceHub(context, settings)
     private val brain = Brain(settings)
 
+    /** True while the window stays open between tasks (the "stay open" setting). */
+    private var inSession = false
+    private var sessionBlank = 0
+
     private val _ui = MutableStateFlow(UiState())
     val ui: StateFlow<UiState> = _ui.asStateFlow()
 
@@ -94,7 +100,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
             amplitude.floatValue = 0f
             when (mode) {
                 Mode.COMMAND -> if (text.isBlank()) noMatch() else heard(text)
-                Mode.FOLLOWUP -> if (text.isBlank()) endQuiet() else heard(text)
+                Mode.FOLLOWUP -> if (text.isBlank()) { if (inSession && sessionBlank++ < 1) beginListening(Mode.FOLLOWUP) else endQuiet() } else { sessionBlank = 0; heard(text) }
                 Mode.CONFIRM -> handleConfirmAnswer(text)
             }
         }
@@ -127,7 +133,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
             val silent = code == 6 || code == 7 // SPEECH_TIMEOUT, NO_MATCH
             when (mode) {
                 Mode.COMMAND -> if (silent) noMatch() else fail(errorMessage(code))
-                Mode.FOLLOWUP -> if (silent) endQuiet() else fail(errorMessage(code))
+                Mode.FOLLOWUP -> if (silent) { if (inSession && sessionBlank++ < 1) beginListening(Mode.FOLLOWUP) else endQuiet() } else fail(errorMessage(code))
                 Mode.CONFIRM -> {
                     val pending = _ui.value.pending
                     if (silent && pending != null) decline(pending) else fail(errorMessage(code))
@@ -209,6 +215,9 @@ class AssistantController(private val context: Context, val settings: Settings) 
     fun modelAlwaysThinks(p: com.demon.cmfassistant.data.Provider): Boolean = brain.alwaysThinks(p)
 
     /** Tests one provider on its own (no fallback), so the result says exactly which one works. */
+    suspend fun fetchVoiceModels(p: com.demon.cmfassistant.data.Provider) = voice.fetchCloudModels(p)
+    suspend fun fetchVoiceVoices(p: com.demon.cmfassistant.data.Provider) = voice.fetchCloudVoices(p)
+
     suspend fun testVoiceProvider(p: com.demon.cmfassistant.data.Provider): String = voice.testCloud(p)
 
     suspend fun testProvider(p: com.demon.cmfassistant.data.Provider): String {
@@ -293,6 +302,15 @@ class AssistantController(private val context: Context, val settings: Settings) 
     private fun process(raw: String) {
         val awaiting = awaitingMore
         awaitingMore = false
+        if (inSession && Wrapup.endsSession(raw)) {
+            if (Wrapup.isThanks(raw)) {
+                val reply = Wrapup.welcome.random()
+                val token = ++flow
+                transition(AssistantState.SPEAKING, "", raw, reply = reply)
+                say(reply) { if (token == flow) closeConversation() }
+            } else closeConversation()
+            return
+        }
         when (val w = Wrapup.classify(raw, awaiting)) {
             Wrapup.Result.Dismiss -> {
                 // "Close the app" outside a wrap-up means go home; inside one it just ends the chat.
@@ -367,7 +385,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
                 if (launch == null) success(result.message, text, askMore = !opensAnotherApp(cmd))
                 else successLaunching(result.message, text, launch)
             }
-            is ActionResult.Failure -> fail(result.message, text)
+            is ActionResult.Failure -> fail(result.message, text, session = true)
             is ActionResult.Confirm -> askConfirm(
                 PendingConfirm(
                     title = result.title,
@@ -456,7 +474,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
 
     private fun afterReply() {
         lastActive = SystemClock.uptimeMillis()
-        if (settings.followUp && hasMicPermission()) {
+        if ((settings.followUp || settings.stayOpen) && hasMicPermission()) {
             speakJob = scope.launch {
                 delay(250)
                 beginListening(Mode.FOLLOWUP)
@@ -530,7 +548,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
     // ---- Results ----
 
     /** Commands that put another app in front, where the mic can't keep listening. */
-    private fun opensAnotherApp(c: Command) = c is Command.Search || c is Command.Navigate || c is Command.Call ||
+    private fun opensAnotherApp(c: Command) = c is Command.Screen || c is Command.Search || c is Command.Navigate || c is Command.Call ||
         c is Command.ComposeSms || c === Command.Camera || c is Command.OpenSettings || c is Command.OpenSetting ||
         c is Command.OpenUrl || c is Command.Email || c is Command.AddEvent || c === Command.Wallpaper ||
         c === Command.ShowAlarms || c is Command.OpenApp || c is Command.LaunchPackage || c is Command.PlayMusic ||
@@ -540,6 +558,11 @@ class AssistantController(private val context: Context, val settings: Settings) 
         val token = ++flow
         transition(AssistantState.SUCCESS, message, transcript)
         haptics.success()
+        if (settings.stayOpen && hasMicPermission()) {
+            // Say what was done, then keep the window open and wait for the next task.
+            say(message) { if (token == flow) continueSession() }
+            return
+        }
         if (askMore && settings.followUp && settings.speakReplies && voice.available && hasMicPermission()) {
             // Say what was done, then ask if there is anything else, then listen.
             voice.speak(message) {
@@ -562,22 +585,44 @@ class AssistantController(private val context: Context, val settings: Settings) 
         haptics.success()
         val fired = java.util.concurrent.atomic.AtomicBoolean(false)
         val go = { if (fired.compareAndSet(false, true)) launch() }
+        val keepOpen = settings.stayOpen && hasMicPermission()
+        val token = flow
         if (settings.speakReplies && voice.available) {
-            voice.speak(message, { go() }, {})
+            voice.speak(message, { go() }, { if (keepOpen && token == flow) continueSession() })
             scope.launch {
                 delay(350) // never hold the action back longer than this if the voice is slow to start
                 go()
             }
         } else {
             go()
+            if (keepOpen) scope.launch { delay(900); if (token == flow) continueSession() }
         }
-        scheduleIdle(1800)
+        if (!keepOpen) scheduleIdle(1800)
     }
 
-    private fun fail(message: String, transcript: String = _ui.value.transcript) {
-        flow++
+    /** Between tasks: put the window back over the current app if it was hidden, and listen for the next instruction. */
+    private fun continueSession() {
+        inSession = true
+        val t = ++flow
+        speakJob?.cancel()
+        speakJob = scope.launch {
+            if (!MainActivity.resumed && PanelActivity.current == null) {
+                PanelActivity.show(context)
+                delay(550)
+            } else delay(120)
+            if (t == flow) beginListening(Mode.FOLLOWUP)
+        }
+    }
+
+    private fun fail(message: String, transcript: String = _ui.value.transcript, session: Boolean = false) {
+        val token = ++flow
         transition(AssistantState.FAILURE, message, transcript)
         haptics.failure()
+        if (session && settings.stayOpen && hasMicPermission()) {
+            // Say what went wrong, then stay open so the user can say what to do next.
+            say(message) { if (token == flow) continueSession() }
+            return
+        }
         speakStatus(message)
         scheduleIdle(3200)
     }
@@ -616,6 +661,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
     }
 
     init {
+        actions.onProgress = { status -> transition(AssistantState.EXECUTING, status, _ui.value.transcript) }
         voice.onNeuralReady = { prewarmVoice() }
         if (voice.neural.phase == NeuralVoice.Phase.READY) prewarmVoice()
     }
@@ -635,6 +681,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         reply: String = "",
         micOpen: Boolean = false
     ) {
+        if (state == AssistantState.IDLE) { inSession = false; sessionBlank = 0 }
         _ui.update {
             UiState(
                 state = state,

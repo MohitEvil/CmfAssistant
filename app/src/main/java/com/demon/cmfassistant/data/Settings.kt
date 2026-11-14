@@ -55,6 +55,7 @@ object VoicePresets {
     val all = listOf(
         Preset("v_openai", "OPENAI", "https://api.openai.com/v1", "gpt-4o-mini-tts", "alloy"),
         Preset("v_groq", "GROQ", "https://api.groq.com/openai/v1", "canopylabs/orpheus-v1-english", "hannah"),
+        Preset("v_google", "GOOGLE", "https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash-preview-tts", "Kore"),
         Preset("v_eleven", "ELEVENLABS", "https://api.elevenlabs.io/v1", "eleven_flash_v2_5", "21m00Tcm4TlvDq8ikWAM")
     )
 }
@@ -123,6 +124,9 @@ class Settings(context: Context) {
         private set
     var followUp by mutableStateOf(sp.getBoolean("follow_up", true))
         private set
+    /** After each task, keep the window open and listen for the next one until you say ok, thanks or stop. */
+    var stayOpen by mutableStateOf(sp.getBoolean("stay_open", true))
+        private set
 
     // Optional AI chat (bring your own key)
     /** Providers in priority order. Edited from the AI chat page. */
@@ -185,6 +189,8 @@ class Settings(context: Context) {
                     out.add(Provider(o.getString("id"), o.optString("name"), o.optString("base"), o.optString("model"), o.optString("key"), o.optBoolean("locked"), o.optBoolean("custom"), o.optString("extra")))
                 }
             }
+            // Add any provider that was introduced after the list was first saved (for example Google).
+            VoicePresets.all.forEach { pr -> if (out.none { it.id == pr.id }) out.add(Provider(pr.id, pr.name, pr.baseUrl, pr.model, "", extra = pr.voice)) }
             if (out.isNotEmpty()) return out
         }
         return VoicePresets.all.map { Provider(it.id, it.name, it.baseUrl, it.model, "", extra = it.voice) }
@@ -256,6 +262,8 @@ class Settings(context: Context) {
     fun setTheme(v: Int) { theme = v; sp.edit().putInt("theme", v).apply() }
     @JvmName("applySpeakReplies")
     fun setSpeakReplies(v: Boolean) { speakReplies = v; sp.edit().putBoolean("speak_replies", v).apply() }
+    @JvmName("applyStayOpen")
+    fun setStayOpen(v: Boolean) { stayOpen = v; sp.edit().putBoolean("stay_open", v).apply() }
     @JvmName("applyFollowUp")
     fun setFollowUp(v: Boolean) { followUp = v; sp.edit().putBoolean("follow_up", v).apply() }
 

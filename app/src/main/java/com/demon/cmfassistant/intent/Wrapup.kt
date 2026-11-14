@@ -54,6 +54,21 @@ object Wrapup {
         RegexOption.IGNORE_CASE
     )
 
+    private val endWords = setOf(
+        "ok", "okay", "alright", "fine", "cool", "great", "perfect", "nice", "good", "done", "thanks", "thank", "you", "thx", "ty",
+        "stop", "it", "listening", "enough", "bas", "theek", "hai", "thik", "that", "thats", "all", "got", "now", "assistant", "bye", "goodbye", "close", "exit", "quit", "cancel", "shukriya", "dhanyavad"
+    )
+
+    /** While the window stays open between tasks: "ok", "ok thanks", "stop it", "that's all" end the session. */
+    fun endsSession(raw: String): Boolean {
+        val tokens = raw.lowercase().replace("’", "").replace("'", "").split(splitter).filter { it.isNotEmpty() }
+        if (tokens.isEmpty() || tokens.size > 5) return false
+        if (tokens.first() == "close" && tokens.size > 1 && tokens[1] in setOf("app", "this", "it", "the")) return false
+        return tokens.all { it in endWords }
+    }
+
+    fun isThanks(raw: String) = thanksTail.containsMatchIn(raw)
+
     fun classify(raw: String, awaiting: Boolean): Result {
         val text = raw.trim()
         val tokens = text.lowercase().replace("’", "").replace("'", "").split(splitter).filter { it.isNotEmpty() }

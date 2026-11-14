@@ -9,6 +9,9 @@ enum class RingerMode { SILENT, VIBRATE, NORMAL }
 enum class StatusKind { STORAGE, RAM, NETWORK, WIFI, BLUETOOTH, AIRPLANE, DND, BRIGHTNESS }
 enum class AppOp { INFO, UNINSTALL, FORCE_STOP, CLEAR_CACHE }
 enum class GlobalKey { BACK, HOME, RECENTS, NOTIFICATIONS, QUICK_SETTINGS, SCREENSHOT, POWER_MENU, SPLIT }
+enum class TapKind { TAP, LONG, DOUBLE }
+enum class SwipeDir { LEFT, RIGHT, UP, DOWN }
+enum class ClipOp { SELECT_ALL, COPY, PASTE, CUT }
 enum class ValueKind { SMALLEST_WIDTH, ANIMATION }
 
 /** Everything the assistant knows how to do. */
@@ -177,24 +180,76 @@ sealed class Command {
         override fun describe() = "Changing the setting…"
     }
 
-    data class GlobalAction(val key: GlobalKey) : Command() {
+    data class GlobalAction(val key: GlobalKey) : Command(), Screen {
         override fun describe() = "On it…"
     }
 
-    data class UiTap(val label: String) : Command() {
-        override fun describe() = "Tapping $label…"
+    /** Marker for commands that work on whatever app is in front (they need the Accessibility service). */
+    interface Screen
+
+    data class UiTap(val label: String, val kind: TapKind = TapKind.TAP) : Command(), Screen {
+        override fun describe() = when (kind) {
+            TapKind.TAP -> "Tapping $label…"
+            TapKind.LONG -> "Pressing and holding $label…"
+            TapKind.DOUBLE -> "Double tapping $label…"
+        }
     }
 
-    data class UiType(val text: String) : Command() {
+    data class UiSwipe(val dir: SwipeDir) : Command(), Screen {
+        override fun describe() = "Swiping…"
+    }
+
+    data class UiZoom(val zoomIn: Boolean) : Command(), Screen {
+        override fun describe() = "Zooming…"
+    }
+
+    data class UiClip(val op: ClipOp) : Command(), Screen {
+        override fun describe() = "On it…"
+    }
+
+    data class UiScrollEdge(val top: Boolean) : Command(), Screen {
+        override fun describe() = "Scrolling…"
+    }
+
+    /** Press the keyboard's Enter / Search / Send key. */
+    data object UiEnter : Command(), Screen {
+        override fun describe() = "Submitting…"
+    }
+
+    /** In the current app: find the search box, type [query], submit, and optionally open the best result. */
+    data class UiSearch(val query: String, val pick: Boolean) : Command(), Screen {
+        override fun describe() = "Searching for $query…"
+    }
+
+    /** In the current app: type [body] into the message box and press Send. */
+    data class UiSend(val body: String) : Command(), Screen {
+        override fun describe() = "Sending…"
+    }
+
+    /** In a messaging app: find [contact], open the chat, type [body] and send. */
+    data class UiMessage(val contact: String, val body: String) : Command(), Screen {
+        override fun describe() = "Messaging $contact…"
+    }
+
+    data class TakePhoto(val selfie: Boolean) : Command(), Screen {
+        override fun describe() = "Taking a picture…"
+    }
+
+    /** Several steps spoken in one sentence, run one after the other. */
+    data class Chain(val steps: List<Command>) : Command(), Screen {
+        override fun describe() = "Working on it…"
+    }
+
+    data class UiType(val text: String) : Command(), Screen {
         override fun describe() = "Typing…"
     }
 
-    data class UiScroll(val forward: Boolean) : Command() {
+    data class UiScroll(val forward: Boolean) : Command(), Screen {
         override fun describe() = "Scrolling…"
     }
 
     /** "Find the search bar", "can you see a login button": looks on the current screen. */
-    data class UiFind(val label: String) : Command() {
+    data class UiFind(val label: String) : Command(), Screen {
         override fun describe() = "Looking…"
     }
 
@@ -203,7 +258,7 @@ sealed class Command {
         override fun describe() = "Looking for $query…"
     }
 
-    data object ReadScreen : Command() {
+    data object ReadScreen : Command(), Screen {
         override fun describe() = "Reading the screen…"
     }
 

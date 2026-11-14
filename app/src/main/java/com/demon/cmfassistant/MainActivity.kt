@@ -195,6 +195,8 @@ class MainActivity : ComponentActivity() {
                 settings = settings,
                 palette = palette,
                 onTestVoice = controller::testVoiceProvider,
+                onFetchModels = controller::fetchVoiceModels,
+                onFetchVoices = controller::fetchVoiceVoices,
                 onOpenChatTab = { showAiVoice = false; showAi = true },
                 onClose = { showAiVoice = false }
             )

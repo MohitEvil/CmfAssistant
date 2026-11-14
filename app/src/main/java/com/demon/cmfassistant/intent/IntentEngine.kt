@@ -60,6 +60,9 @@ object IntentEngine {
         if (s.isEmpty()) return Command.Unknown(raw)
         val l = Canon.phrase(s.replace(',', ' '))
 
+        // Several steps in one sentence: "open telegram and message demon hi"
+        Chain.parse(s)?.let { return it }
+
         // Flashlight
         if (flashlightWord.containsMatchIn(l)) {
             val on = when {

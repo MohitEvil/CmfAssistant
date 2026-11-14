@@ -12,7 +12,13 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
+import org.json.JSONArray
 import org.json.JSONObject
+import android.util.Base64
+import java.io.ByteArrayOutputStream
+
+/** One choice in a fetched list: [value] is what gets saved, [label] is what is shown. */
+class Pick(val value: String, val label: String)
 
 /**
  * Optional AI voice: sends the reply text to a text-to-speech provider (OpenAI style, Groq, ElevenLabs or a custom
@@ -90,12 +96,48 @@ class CloudVoice(private val context: Context, private val settings: Settings) {
         val clean = text.take(3800)
         val eleven = p.baseUrl.contains("elevenlabs")
         val groq = p.baseUrl.contains("groq")
-        val ext = if (groq) "wav" else "mp3"
+        val google = p.baseUrl.contains("generativelanguage")
+        val ext = if (groq || google) "wav" else "mp3"
         val key = "${p.id}_${p.model}_${p.extra}_${clean.hashCode()}.$ext"
         val cached = File(dir, key)
         if (cached.exists() && cached.length() > 200) return cached
 
         val base = p.baseUrl.trimEnd('/')
+        if (google) {
+            val body = JSONObject()
+                .put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(JSONObject().put("text", clean)))))
+                .put(
+                    "generationConfig", JSONObject()
+                        .put("responseModalities", JSONArray().put("AUDIO"))
+                        .put(
+                            "speechConfig", JSONObject().put(
+                                "voiceConfig", JSONObject().put("prebuiltVoiceConfig", JSONObject().put("voiceName", p.extra.ifBlank { "Kore" }))
+                            )
+                        )
+                )
+            val c = URL("$base/models/${p.model}:generateContent").openConnection() as HttpURLConnection
+            try {
+                c.requestMethod = "POST"
+                c.connectTimeout = 8000
+                c.readTimeout = 30000
+                c.doOutput = true
+                c.setRequestProperty("Content-Type", "application/json")
+                c.setRequestProperty("x-goog-api-key", p.key)
+                c.outputStream.use { it.write(body.toString().toByteArray()) }
+                if (c.responseCode !in 200..299) {
+                    val err = runCatching { c.errorStream?.bufferedReader()?.readText() }.getOrNull().orEmpty().take(160)
+                    throw RuntimeException("HTTP ${c.responseCode} $err")
+                }
+                val json = JSONObject(c.inputStream.bufferedReader().readText())
+                val b64 = json.getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts")
+                    .getJSONObject(0).getJSONObject("inlineData").getString("data")
+                cached.writeBytes(wav(Base64.decode(b64, Base64.DEFAULT), 24000))
+            } finally {
+                c.disconnect()
+            }
+            trim()
+            return cached.takeIf { it.length() > 200 }
+        }
         val url = if (eleven) "$base/text-to-speech/${p.extra.ifBlank { "21m00Tcm4TlvDq8ikWAM" }}?output_format=mp3_44100_64"
         else "$base/audio/speech"
         val body = if (eleven) JSONObject().put("text", clean).put("model_id", p.model)
@@ -125,5 +167,85 @@ class CloudVoice(private val context: Context, private val settings: Settings) {
     private fun trim() {
         val files = dir.listFiles()?.sortedBy { it.lastModified() } ?: return
         if (files.size > 40) files.take(files.size - 40).forEach { it.delete() }
+    }
+
+    /** Raw 16-bit mono PCM -> a playable WAV file. */
+    private fun wav(pcm: ByteArray, rate: Int): ByteArray {
+        val out = ByteArrayOutputStream()
+        fun le(v: Int, n: Int) { for (i in 0 until n) out.write((v shr (8 * i)) and 0xff) }
+        out.write("RIFF".toByteArray()); le(36 + pcm.size, 4); out.write("WAVE".toByteArray())
+        out.write("fmt ".toByteArray()); le(16, 4); le(1, 2); le(1, 2); le(rate, 4); le(rate * 2, 4); le(2, 2); le(16, 2)
+        out.write("data".toByteArray()); le(pcm.size, 4); out.write(pcm)
+        return out.toByteArray()
+    }
+
+    private fun get(url: String, p: Provider): String {
+        val c = URL(url).openConnection() as HttpURLConnection
+        try {
+            c.connectTimeout = 12000
+            c.readTimeout = 20000
+            when {
+                p.baseUrl.contains("elevenlabs") -> c.setRequestProperty("xi-api-key", p.key)
+                p.baseUrl.contains("generativelanguage") -> c.setRequestProperty("x-goog-api-key", p.key)
+                else -> c.setRequestProperty("Authorization", "Bearer ${p.key}")
+            }
+            if (c.responseCode !in 200..299) {
+                val err = runCatching { c.errorStream?.bufferedReader()?.readText() }.getOrNull().orEmpty().take(120)
+                throw RuntimeException("HTTP ${c.responseCode} $err")
+            }
+            return c.inputStream.bufferedReader().readText()
+        } finally {
+            c.disconnect()
+        }
+    }
+
+    /** Asks the provider which voice models this key can use. */
+    suspend fun fetchModels(p: Provider): Result<List<Pick>> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching {
+            if (p.baseUrl.isBlank()) throw RuntimeException("Fill in ADDRESS first.")
+            if (p.key.isBlank()) throw RuntimeException("Fill in API KEY first.")
+            val base = p.baseUrl.trimEnd('/')
+            val ids = ArrayList<String>()
+            when {
+                base.contains("elevenlabs") -> {
+                    val arr = JSONArray(get("$base/models", p))
+                    for (i in 0 until arr.length()) arr.getJSONObject(i).optString("model_id").takeIf { it.isNotBlank() }?.let { ids.add(it) }
+                }
+                base.contains("generativelanguage") -> {
+                    val arr = JSONObject(get("$base/models?pageSize=200", p)).optJSONArray("models") ?: JSONArray()
+                    for (i in 0 until arr.length()) ids.add(arr.getJSONObject(i).optString("name").removePrefix("models/"))
+                }
+                else -> {
+                    val arr = JSONObject(get("$base/models", p)).optJSONArray("data") ?: JSONArray()
+                    for (i in 0 until arr.length()) ids.add(arr.getJSONObject(i).optString("id"))
+                }
+            }
+            val all = ids.filter { it.isNotBlank() }.distinct().sorted()
+            val speech = all.filter { it.contains("tts", true) || it.contains("speech", true) || it.contains("voice", true) || it.contains("eleven_", true) || it.contains("orpheus", true) || it.contains("audio", true) }
+            val use = speech.ifEmpty { all }
+            if (use.isEmpty()) throw RuntimeException("No models came back.")
+            use.map { Pick(it, it) }
+        }.recoverCatching { throw RuntimeException(it.message ?: "Couldn't fetch models.") }
+    }
+
+    /** The voices this provider offers (fetched for ElevenLabs, built in for the others). */
+    suspend fun fetchVoices(p: Provider): Result<List<Pick>> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        runCatching {
+            val base = p.baseUrl.trimEnd('/')
+            when {
+                base.contains("elevenlabs") -> {
+                    if (p.key.isBlank()) throw RuntimeException("Fill in API KEY first.")
+                    val arr = JSONObject(get("$base/voices", p)).getJSONArray("voices")
+                    (0 until arr.length()).map { arr.getJSONObject(it) }.map { Pick(it.getString("voice_id"), it.optString("name") + "  ·  " + it.getString("voice_id").take(6) + "…") }
+                }
+                base.contains("generativelanguage") -> listOf(
+                    "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe", "Autonoe", "Enceladus", "Iapetus",
+                    "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar", "Alnilam", "Schedar",
+                    "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
+                ).map { Pick(it, it) }
+                base.contains("groq") -> listOf("autumn", "diana", "hannah", "austin", "daniel", "troy").map { Pick(it, it) }
+                else -> listOf("alloy", "ash", "ballad", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer", "verse", "marin", "cedar").map { Pick(it, it) }
+            }
+        }.recoverCatching { throw RuntimeException(it.message ?: "Couldn't fetch voices.") }
     }
 }

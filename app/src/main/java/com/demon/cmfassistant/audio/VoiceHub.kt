@@ -119,6 +119,9 @@ class VoiceHub(context: Context, private val settings: Settings) : Voice {
         system.speak(raw, onStart, onDone)
     }
 
+    suspend fun fetchCloudModels(p: com.demon.cmfassistant.data.Provider) = cloud.fetchModels(p)
+    suspend fun fetchCloudVoices(p: com.demon.cmfassistant.data.Provider) = cloud.fetchVoices(p)
+
     suspend fun testCloud(p: com.demon.cmfassistant.data.Provider): String = cloud.test(p)
 
     override fun stop() {

@@ -45,6 +45,34 @@ object ControlIntents {
                 has(l, "\\b(on|enable|restore|normal|default|reset)\\b") -> return Command.SetValue(ValueKind.ANIMATION, "1")
             }
         }
+        // Camera: really take the picture
+        if (has(l, "^(?:take|click|capture|snap|shoot|grab|get)(?: me)?(?: a| an| the| one)?(?: new| quick| nice)? ?(?:selfie|self portrait)( now)?$|^(?:take|click|capture|snap|shoot)(?: me)?(?: a| an| the| one)?(?: new| quick| nice)? ?(?:photo|picture|pic|snap|shot|photograph)(?: of me)?( now)?$|^(?:selfie|photo|picture)( please)?$|^(?:smile|cheese)$")) {
+            return Command.TakePhoto(has(l, "selfie|of me|self portrait"))
+        }
+        if (has(l, "^(?:tap|click|press|hit)(?: on)?(?: the)? (?:shutter|capture|take (?:a )?(?:photo|picture)|camera) ?(?:button|icon)?$")) return Command.TakePhoto(false)
+        // Finger gestures
+        Regex("^(?:long press|long tap|long click|press and hold|tap and hold|click and hold|touch and hold|press hold|hold down|hold)(?: on| the| onto)*\\s*(.*)$").find(l)?.let { m ->
+            val what = m.groupValues[1].trim()
+            if (!has(l, "^hold on") && !has(l, "^hold (a|the) ") && !has(l, "^hold (it|up)$")) return Command.UiTap(what.removeSuffix(" button").removeSuffix(" icon"), TapKind.LONG)
+        }
+        Regex("^(?:double tap|double click|double press|double touch|tap twice|click twice|two taps)(?: on| the| onto)*\\s*(.*)$").find(l)?.let { m ->
+            return Command.UiTap(m.groupValues[1].trim().removeSuffix(" button").removeSuffix(" icon"), TapKind.DOUBLE)
+        }
+        Regex("^(?:swipe|slide|flick|drag|move)\\s+(left|right|up|down)(?: a bit| more| a little| please)?$").find(l)?.let { m ->
+            if (m.groupValues[1] == "left" || m.groupValues[1] == "right") return Command.UiSwipe(if (m.groupValues[1] == "left") SwipeDir.LEFT else SwipeDir.RIGHT)
+        }
+        Regex("^(?:swipe|slide|flick)\\s+(up|down)$").find(l)?.let { return Command.UiSwipe(if (it.groupValues[1] == "up") SwipeDir.UP else SwipeDir.DOWN) }
+        Regex("^(?:zoom|pinch)(?: in| out)?$|^(?:zoom|pinch)\\s+(in|out)$").find(l)?.let { m ->
+            val out = l.endsWith("out")
+            return Command.UiZoom(!out)
+        }
+        Regex("^(select all|copy|copy this|copy it|copy that|paste|paste it|paste here|paste that|cut|cut this|cut it)$").find(l)?.let { m ->
+            return Command.UiClip(when { m.value.startsWith("select") -> ClipOp.SELECT_ALL; m.value.startsWith("copy") -> ClipOp.COPY; m.value.startsWith("paste") -> ClipOp.PASTE; else -> ClipOp.CUT })
+        }
+        Regex("^(?:scroll |go |jump |take me )?(?:all the way )?(?:to )?(?:the )?(top|bottom|end)(?: of (?:the )?(?:page|screen|list|feed))?$").find(l)?.let { m ->
+            return Command.UiScrollEdge(m.groupValues[1] == "top")
+        }
+        if (has(l, "^(?:(?:press|hit|tap|click)(?: the)? (?:enter|return|submit|go|search)(?: key| button)?|enter|submit|press enter)$")) return Command.UiEnter
         // Leaving things: "exit this screen" goes back, "close the app" goes home (Android can't kill other apps without root).
         if (has(l, "^(exit|leave|quit|close|dismiss|get out|come out)( from| of)?( the| this| current| that)*( current)?( screen| page| window| menu| dialog| popup| pop up| settings page)( now)?$")) return Command.GlobalAction(GlobalKey.BACK)
         if (has(l, "^(exit|leave|quit|close|kill|shut|get out|come out)( from| of)?( the| this| current| that| my)*( current)?( app| application| program| it| this| that)?( now)?$") ||

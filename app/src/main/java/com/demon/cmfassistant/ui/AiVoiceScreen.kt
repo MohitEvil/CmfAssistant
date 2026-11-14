@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.demon.cmfassistant.data.Provider
 import com.demon.cmfassistant.data.Settings
 import kotlinx.coroutines.launch
@@ -47,6 +48,8 @@ fun AiVoiceScreen(
     settings: Settings,
     palette: GlyphPalette,
     onTestVoice: suspend (Provider) -> String,
+    onFetchModels: suspend (Provider) -> Result<List<com.demon.cmfassistant.audio.Pick>>,
+    onFetchVoices: suspend (Provider) -> Result<List<com.demon.cmfassistant.audio.Pick>>,
     onOpenChatTab: () -> Unit,
     onClose: () -> Unit
 ) {
@@ -58,6 +61,11 @@ fun AiVoiceScreen(
     var newName by remember { mutableStateOf("") }
     var testing by remember { mutableStateOf(false) }
     var testResult by remember { mutableStateOf("") }
+    var fetching by remember { mutableStateOf("") } // "model", "voice" or ""
+    var fetchNote by remember { mutableStateOf("") }
+    var picks by remember { mutableStateOf<List<com.demon.cmfassistant.audio.Pick>>(emptyList()) }
+    var picksFor by remember { mutableStateOf("") }
+    var filter by remember { mutableStateOf("") }
 
     val on = settings.aiVoiceEnabled
     val list = settings.voiceProviders
@@ -121,7 +129,7 @@ fun AiVoiceScreen(
                             selected = p.id == selectedId,
                             ready = p.ready,
                             palette = palette,
-                            onClick = { adding = false; reorderId = null; testResult = ""; selectedId = if (p.id == selectedId) null else p.id },
+                            onClick = { adding = false; reorderId = null; testResult = ""; picks = emptyList(); fetchNote = ""; selectedId = if (p.id == selectedId) null else p.id },
                             onLongClick = { reorderId = if (reorderId == p.id) null else p.id }
                         )
                     }
@@ -178,11 +186,88 @@ fun AiVoiceScreen(
                                 Field("ADDRESS", selected.baseUrl, palette, keyboard = KeyboardType.Uri) { v -> settings.updateVoiceProvider(selected.id) { it.copy(baseUrl = v) } }
                                 Spacer(Modifier.height(14.dp))
                                 Field("MODEL", selected.model, palette) { v -> settings.updateVoiceProvider(selected.id) { it.copy(model = v) } }
+                                Spacer(Modifier.height(8.dp))
+                                FetchButton(if (fetching == "model") "…" else "FETCH MODELS", palette) {
+                                    if (fetching.isEmpty()) {
+                                        fetching = "model"; fetchNote = ""; picks = emptyList(); filter = ""
+                                        val target = selected
+                                        scope.launch {
+                                            onFetchModels(target).onSuccess { picks = it; picksFor = "model"; fetchNote = "${it.size} MODELS FOUND. TAP ONE." }
+                                                .onFailure { fetchNote = it.message ?: "Couldn't fetch models." }
+                                            fetching = ""
+                                        }
+                                    }
+                                }
                                 Spacer(Modifier.height(14.dp))
                                 Field("VOICE", selected.extra, palette) { v -> settings.updateVoiceProvider(selected.id) { it.copy(extra = v) } }
+                                Spacer(Modifier.height(8.dp))
+                                FetchButton(if (fetching == "voice") "…" else "FETCH VOICES", palette) {
+                                    if (fetching.isEmpty()) {
+                                        fetching = "voice"; fetchNote = ""; picks = emptyList(); filter = ""
+                                        val target = selected
+                                        scope.launch {
+                                            onFetchVoices(target).onSuccess { picks = it; picksFor = "voice"; fetchNote = "${it.size} VOICES FOUND. TAP ONE." }
+                                                .onFailure { fetchNote = it.message ?: "Couldn't fetch voices." }
+                                            fetching = ""
+                                        }
+                                    }
+                                }
+                                if (fetchNote.isNotBlank()) {
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(fetchNote, color = palette.muted, fontFamily = mono, fontSize = 10.sp, letterSpacing = 1.sp)
+                                }
                             }
                         }
                         if (selected.locked) Blocker(Modifier.matchParentSizeCompat(this))
+                    }
+
+                    if (picks.isNotEmpty() && !selected.locked) {
+                        Spacer(Modifier.height(12.dp))
+                        val shown = if (filter.isBlank()) picks else picks.filter { it.label.contains(filter.trim(), ignoreCase = true) }
+                        Card(palette) {
+                            Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    androidx.compose.foundation.text.BasicTextField(
+                                        value = filter,
+                                        onValueChange = { filter = it },
+                                        singleLine = true,
+                                        textStyle = androidx.compose.ui.text.TextStyle(color = palette.fg, fontSize = 12.sp, fontFamily = mono),
+                                        cursorBrush = androidx.compose.ui.graphics.SolidColor(palette.red),
+                                        decorationBox = { inner ->
+                                            if (filter.isEmpty()) Text("filter…", color = palette.muted, fontFamily = mono, fontSize = 12.sp)
+                                            inner()
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .background(palette.bg, RoundedCornerShape(10.dp))
+                                            .border(BorderStroke(1.dp, palette.dim), RoundedCornerShape(10.dp))
+                                            .padding(horizontal = 10.dp, vertical = 7.dp)
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Text("${shown.size}/${picks.size}", color = palette.muted, fontFamily = mono, fontSize = 10.sp, letterSpacing = 1.sp)
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().height(240.dp)) {
+                                    androidx.compose.foundation.lazy.items(shown, key = { it.value }) { pk ->
+                                        val cur = if (picksFor == "model") selected.model.trim() else selected.extra.trim()
+                                        val picked = pk.value == cur
+                                        Row(
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    if (picksFor == "model") settings.updateVoiceProvider(selected.id) { it.copy(model = pk.value) }
+                                                    else settings.updateVoiceProvider(selected.id) { it.copy(extra = pk.value) }
+                                                }
+                                                .padding(horizontal = 6.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(pk.label, color = if (picked) palette.fg else palette.muted, fontFamily = mono, fontSize = 11.sp, modifier = Modifier.weight(1f))
+                                            if (picked) Text("●", color = palette.red, fontSize = 10.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     Spacer(Modifier.height(12.dp))
@@ -243,4 +328,16 @@ fun AiVoiceScreen(
         }
         Spacer(Modifier.height(32.dp))
     }
+}
+
+@Composable
+private fun FetchButton(text: String, palette: GlyphPalette, onClick: () -> Unit) {
+    Text(
+        text,
+        color = palette.fg, fontFamily = FontFamily.Monospace, fontSize = 11.sp, letterSpacing = 1.sp,
+        modifier = Modifier
+            .border(BorderStroke(1.dp, palette.muted), RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+    )
 }

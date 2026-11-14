@@ -64,3 +64,10 @@ Limits: Accessibility must be enabled manually (Access screen); switch labels va
 - Screen awareness (Accessibility + on-device OCR): "what's on screen", "what can you see", "find the search bar", "tap search", "click Login". If an app exposes no text, a screenshot is read with on-device OCR.
 - Gentle declines: no mention of keys or AI unless AI is on and set up.
 - Settings > AI settings has two tabs: AI Chat and AI Voice (cloud text-to-speech with OpenAI, Groq, ElevenLabs or custom). Both are OFF by default; the offline voice is the fallback.
+
+## Gestures, chains, stay-open, camera (latest)
+- Gestures: long press / press and hold / tap and hold <thing>, double tap <thing>, swipe left/right/up/down, zoom in/out, select all / copy / paste / cut, scroll to top/bottom, press enter. "click it" repeats the last target.
+- Chains: "open settings and search developer options", "open telegram and message demon hi", "send hi to demon on whatsapp", "turn off wifi and turn on bluetooth". In-app search and messaging find the search box/message box and Send button on their own. If a step fails, the assistant says which step it got stuck on and waits for your next instruction.
+- Stay open between tasks (Settings > Stay open between tasks, on by default): after each task the window comes back and listens for the next one. Say ok, thanks, stop it or stop listening to close. Needs "Display over other apps" so the window can return over other apps.
+- Camera: "take a picture / selfie" opens the camera and presses the shutter (selfie flips to the front camera and waits 1.5 s). With the camera already open, "take a picture" or "tap shutter" presses it.
+- AI voice: FETCH MODELS and FETCH VOICES, and a Google (Gemini TTS) provider.

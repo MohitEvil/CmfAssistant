@@ -102,6 +102,10 @@ fun SettingsScreen(
                 settings.setFollowUp(it)
             }
             Divider(palette)
+            ToggleRow("Stay open between tasks", "After each task keep listening for the next one. Say ok, thanks or stop to close", settings.stayOpen, palette) {
+                settings.setStayOpen(it)
+            }
+            Divider(palette)
             ToggleRow("Floating bubble", "Draws over other apps. Tap to talk.", settings.bubble, palette, onBubbleToggle)
         }
 

@@ -124,7 +124,7 @@ object SystemIntents {
             return Command.AppAction(AppOp.INFO, it.groupValues[1].trim())
         }
         // Clipboard
-        if (has(l, "\\b(read|what(?:s| is)(?: on| in)?) (?:my |the )?clipboard\\b|^paste$")) return Command.ReadClipboard
+        if (has(l, "\\b(read|what(?:s| is)(?: on| in)?) (?:my |the )?clipboard\\b")) return Command.ReadClipboard
         Regex("^copy\\s+(.+?)(?:\\s+to (?:the |my )?clipboard)?$", R).find(s)?.let {
             return Command.CopyText(it.groupValues[1].trim())
         }

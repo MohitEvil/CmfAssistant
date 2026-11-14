@@ -306,4 +306,254 @@ class CmfAccess : AccessibilityService() {
         val g = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 60)).build()
         return dispatchGesture(g, null, null)
     }
+
+    // ---- More ways to act ----
+
+    fun frontPackage(): String = roots().firstOrNull()?.packageName?.toString().orEmpty()
+
+    /** Long press: the node's own long-click action (cannot be cancelled by a touch), else a held gesture. */
+    fun longClick(n: AccessibilityNodeInfo, holdMs: Long = 800): Boolean {
+        var c: AccessibilityNodeInfo? = n
+        var i = 0
+        while (c != null && i < 7) {
+            if (c.isLongClickable && c.isEnabled && c.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)) return true
+            c = c.parent
+            i++
+        }
+        val r = Rect()
+        n.getBoundsInScreen(r)
+        return holdAt(r.exactCenterX(), r.exactCenterY(), holdMs)
+    }
+
+    fun holdAt(x: Float, y: Float, ms: Long): Boolean {
+        val path = Path().apply { moveTo(x, y) }
+        return dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, ms)).build(), null, null)
+    }
+
+    /** Two quick taps in the same place. */
+    fun doubleTapAt(x: Float, y: Float): Boolean {
+        val b = GestureDescription.Builder()
+        b.addStroke(GestureDescription.StrokeDescription(Path().apply { moveTo(x, y) }, 0, 40))
+        b.addStroke(GestureDescription.StrokeDescription(Path().apply { moveTo(x, y) }, 140, 40))
+        return dispatchGesture(b.build(), null, null)
+    }
+
+    fun centre(n: AccessibilityNodeInfo): Pair<Float, Float>? {
+        val r = Rect()
+        n.getBoundsInScreen(r)
+        return if (r.isEmpty) null else r.exactCenterX() to r.exactCenterY()
+    }
+
+    fun swipe(dir: String): Boolean {
+        val dm = resources.displayMetrics
+        val w = dm.widthPixels.toFloat()
+        val h = dm.heightPixels.toFloat()
+        val (x1, y1, x2, y2) = when (dir) {
+            "left" -> listOf(w * 0.8f, h * 0.5f, w * 0.2f, h * 0.5f)
+            "right" -> listOf(w * 0.2f, h * 0.5f, w * 0.8f, h * 0.5f)
+            "up" -> listOf(w * 0.5f, h * 0.7f, w * 0.5f, h * 0.3f)
+            else -> listOf(w * 0.5f, h * 0.3f, w * 0.5f, h * 0.7f)
+        }
+        val path = Path().apply { moveTo(x1, y1); lineTo(x2, y2) }
+        return dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 260)).build(), null, null)
+    }
+
+    /** Pinch: two fingers moving apart (zoom in) or together (zoom out). */
+    fun pinch(zoomIn: Boolean): Boolean {
+        val dm = resources.displayMetrics
+        val cx = dm.widthPixels / 2f
+        val cy = dm.heightPixels / 2f
+        val near = dm.widthPixels * 0.06f
+        val far = dm.widthPixels * 0.30f
+        val (a, b) = if (zoomIn) near to far else far to near
+        val p1 = Path().apply { moveTo(cx - a, cy); lineTo(cx - b, cy) }
+        val p2 = Path().apply { moveTo(cx + a, cy); lineTo(cx + b, cy) }
+        val g = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(p1, 0, 350))
+            .addStroke(GestureDescription.StrokeDescription(p2, 0, 350))
+            .build()
+        return dispatchGesture(g, null, null)
+    }
+
+    /** Select all / copy / paste / cut in the focused text box. */
+    fun clip(op: String): Boolean {
+        var f: AccessibilityNodeInfo? = null
+        for (r in roots()) {
+            f = r.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: r.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY)
+            if (f != null) break
+        }
+        val node = f ?: findEditable() ?: return false
+        return when (op) {
+            "select_all" -> {
+                val len = node.text?.length ?: 0
+                val args = Bundle().apply {
+                    putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
+                    putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, len)
+                }
+                node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, args)
+            }
+            "copy" -> node.performAction(AccessibilityNodeInfo.ACTION_COPY)
+            "paste" -> node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            else -> node.performAction(AccessibilityNodeInfo.ACTION_CUT)
+        }
+    }
+
+    /** The keyboard's Enter / Search / Send key for the focused text box. */
+    fun imeEnter(): Boolean {
+        val f = roots().firstNotNullOfOrNull { it.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) } ?: findEditable() ?: return false
+        return f.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+    }
+
+    fun scrollEdge(top: Boolean): Boolean {
+        var any = false
+        repeat(25) {
+            val moved = scroll(!top)
+            if (!moved) return any
+            any = true
+        }
+        return any
+    }
+
+    /** The search field, or the icon/button that opens one. Second value is true when it is already a text box. */
+    fun findSearchTrigger(): Pair<AccessibilityNodeInfo, Boolean>? {
+        findEditable()?.let { e ->
+            val l = (e.text?.toString().orEmpty() + e.hintText + e.contentDescription).lowercase()
+            if (l.contains("search") || l.contains("find")) return e to true
+        }
+        var best: AccessibilityNodeInfo? = null
+        var bestScore = 0
+        for (r in roots()) {
+            walk(r) { n ->
+                if (n.isVisibleToUser && !n.isEditable) {
+                    val l = labelOf(n)
+                    if (l.isNotEmpty() && l.length < 40 && (l.contains("search") || l == "find")) {
+                        var clickable = false
+                        var c: AccessibilityNodeInfo? = n
+                        repeat(4) { if (c != null && c!!.isClickable) clickable = true; c = c?.parent }
+                        if (clickable) {
+                            val score = if (l == "search") 3 else if (l.startsWith("search")) 2 else 1
+                            if (score > bestScore) { best = n; bestScore = score }
+                        }
+                    }
+                }
+                false
+            }
+        }
+        best?.let { return it to false }
+        findEditable()?.let { return it to true }
+        return null
+    }
+
+    /** A visible editable field (the one to type into), after a short wait. */
+    suspend fun waitEditable(ms: Long = 1500): AccessibilityNodeInfo? {
+        val end = System.currentTimeMillis() + ms
+        while (System.currentTimeMillis() < end) {
+            findEditable()?.let { return it }
+            delay(60)
+        }
+        return null
+    }
+
+    /** Best on-screen text matching [query]: exact beats starts-with beats contains; the text box itself is ignored. */
+    fun bestMatch(query: String): AccessibilityNodeInfo? {
+        val q = norm(query)
+        if (q.isEmpty()) return null
+        var best: AccessibilityNodeInfo? = null
+        var bestScore = 0.0
+        val skip = setOf("search", "cancel", "clear", "back", "close", "voicesearch", "searchforq", "all", "chats", "people")
+        for (r in roots()) {
+            walk(r) { n ->
+                if (n.isVisibleToUser && !n.isEditable) {
+                    val l = norm(n.text).ifEmpty { norm(n.contentDescription) }
+                    if (l.isNotEmpty() && l !in skip) {
+                        var sc = when {
+                            l == q -> 1.0
+                            l.startsWith(q) -> 0.9
+                            l.contains(q) && !l.startsWith("searchfor") -> 0.7
+                            else -> 0.0
+                        }
+                        if (sc == 0.0 && l.length <= 40) {
+                            val d = com.demon.cmfassistant.action.Fuzzy.similarity(q, l)
+                            if (d >= 0.6) sc = d * 0.8
+                        }
+                        if (sc > bestScore) { best = n; bestScore = sc }
+                    }
+                }
+                false
+            }
+        }
+        return if (bestScore >= 0.5) best else null
+    }
+
+    /** The send / submit button next to a message box. */
+    fun findSend(): AccessibilityNodeInfo? {
+        find(listOf("Send", "Send message", "Send button", "Post", "Submit"))?.let { return it }
+        return null
+    }
+
+    /** The camera shutter: by label first, otherwise the round clickable thing nearest the bottom centre. */
+    fun findShutter(): AccessibilityNodeInfo? {
+        find(listOf("Shutter", "Shutter button", "Take photo", "Take picture", "Capture", "Take a photo", "Camera shutter", "Photo"))?.let { return it }
+        val dm = resources.displayMetrics
+        var best: AccessibilityNodeInfo? = null
+        var bestD = Float.MAX_VALUE
+        val r = Rect()
+        for (root in roots()) {
+            walk(root) { n ->
+                if (n.isVisibleToUser && n.isClickable && n.isEnabled) {
+                    n.getBoundsInScreen(r)
+                    val w = r.width()
+                    val wantMin = dm.density * 48
+                    val wantMax = dm.density * 160
+                    if (r.centerY() > dm.heightPixels * 0.72f && w in wantMin.toInt()..wantMax.toInt() && r.height() in wantMin.toInt()..wantMax.toInt()) {
+                        val d = Math.abs(r.centerX() - dm.widthPixels / 2f)
+                        if (d < dm.widthPixels * 0.18f && d < bestD) { best = n; bestD = d }
+                    }
+                }
+                false
+            }
+        }
+        return best
+    }
+
+    suspend fun waitSearch(ms: Long): Pair<AccessibilityNodeInfo, Boolean>? {
+        val end = System.currentTimeMillis() + ms
+        while (System.currentTimeMillis() < end) {
+            findSearchTrigger()?.let { return it }
+            delay(70)
+        }
+        return null
+    }
+
+    suspend fun waitShutter(ms: Long): AccessibilityNodeInfo? {
+        val end = System.currentTimeMillis() + ms
+        while (System.currentTimeMillis() < end) {
+            findShutter()?.let { return it }
+            delay(100)
+        }
+        return null
+    }
+
+    /** The first tappable result under the search box. */
+    fun firstResult(): AccessibilityNodeInfo? {
+        val field = findEditable()
+        val fr = Rect()
+        field?.getBoundsInScreen(fr)
+        val top = if (field != null) fr.bottom else 0
+        var best: AccessibilityNodeInfo? = null
+        var bestY = Int.MAX_VALUE
+        val r = Rect()
+        for (root in roots()) {
+            walk(root) { n ->
+                if (n.isVisibleToUser && !n.isEditable && n.isClickable && n.isEnabled) {
+                    n.getBoundsInScreen(r)
+                    if (r.top >= top - 4 && r.top < bestY && (n.text?.isNotEmpty() == true || n.contentDescription?.isNotEmpty() == true || n.childCount > 0)) {
+                        best = n; bestY = r.top
+                    }
+                }
+                false
+            }
+        }
+        return best
+    }
 }

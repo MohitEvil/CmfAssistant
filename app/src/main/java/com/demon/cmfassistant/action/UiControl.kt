@@ -12,6 +12,9 @@ import com.demon.cmfassistant.access.CmfAccess
 import com.demon.cmfassistant.access.Ocr
 import com.demon.cmfassistant.debug.AppLog
 import com.demon.cmfassistant.intent.AppOp
+import com.demon.cmfassistant.intent.ClipOp
+import com.demon.cmfassistant.intent.SwipeDir
+import com.demon.cmfassistant.intent.TapKind
 import com.demon.cmfassistant.intent.GlobalKey
 import com.demon.cmfassistant.intent.ValueKind
 import kotlinx.coroutines.Dispatchers
@@ -290,24 +293,214 @@ class UiControl(context: Context) {
 
     private fun isSearchLabel(label: String) = label.lowercase().trim() in searchWords
 
-    suspend fun tap(label: String): ActionResult = withContext(Dispatchers.Default) {
+    private var lastTarget = ""
+
+    private val shutterWords = setOf("shutter", "shutterbutton", "takephoto", "takeapicture", "takepicture", "takeaphoto", "capture", "capturebutton", "clickphoto", "clickpicture", "camerabutton", "photobutton")
+
+    suspend fun tap(label: String, kind: TapKind = TapKind.TAP): ActionResult = withContext(Dispatchers.Default) {
         val svc = CmfAccess.instance ?: return@withContext needAccess("tap things")
         clearWay(svc)
-        AppLog.d("ui", "tap '$label'")
-        if (isSearchLabel(label)) {
-            val f = svc.findEditable() ?: svc.waitFind(listOf("Search"), 900)
-            if (f != null && svc.click(f)) return@withContext ActionResult.Success("Tapped the search box.")
+        var target = label.trim()
+        if (target.lowercase() in setOf("it", "that", "this", "this one", "that one", "same")) target = lastTarget
+        if (target.isEmpty()) return@withContext ActionResult.Failure("Which thing should I ${if (kind == TapKind.LONG) "press and hold" else if (kind == TapKind.DOUBLE) "double tap" else "tap"}?")
+        AppLog.d("ui", "tap '$target' kind=$kind")
+        if (target == "@first") {
+            val f = svc.firstResult()
+            return@withContext if (f != null && svc.click(f)) ActionResult.Success("Opened the first result.") else ActionResult.Failure("I can't see a result to open.")
         }
-        val n = svc.waitFind(listOf(label), 1000) ?: svc.scrollToFind(listOf(label), 6)
+        val key = CmfAccess.norm(target)
+        if (key in shutterWords) return@withContext takePhotoNow(svc, selfie = false, openCamera = false)
+        lastTarget = target
+
+        fun act(n: android.view.accessibility.AccessibilityNodeInfo): Boolean = when (kind) {
+            TapKind.TAP -> svc.click(n)
+            TapKind.LONG -> svc.longClick(n)
+            TapKind.DOUBLE -> svc.centre(n)?.let { svc.doubleTapAt(it.first, it.second) } ?: false
+        }
+        val done = when (kind) { TapKind.TAP -> "Tapped $target."; TapKind.LONG -> "Held $target."; TapKind.DOUBLE -> "Double tapped $target." }
+
+        if (isSearchLabel(target) || key == "search") {
+            // After typing, "click search" means submit; before typing it means open the search box.
+            val button = svc.find(listOf("Search")).takeIf { it != null && !it.isEditable }
+            if (button != null && kind == TapKind.TAP && svc.findEditable()?.text?.isNotEmpty() == true && svc.click(button)) return@withContext ActionResult.Success(done)
+            val f = svc.findEditable()
+            if (f != null) {
+                if (kind == TapKind.TAP && f.text?.isNotEmpty() == true && svc.imeEnter()) return@withContext ActionResult.Success("Searching.")
+                if (act(f)) return@withContext ActionResult.Success(done)
+            }
+            svc.findSearchTrigger()?.let { if (act(it.first)) return@withContext ActionResult.Success(done) }
+        }
+        val n = svc.waitFind(listOf(target), 1000) ?: svc.scrollToFind(listOf(target), 6)
         if (n != null) {
-            return@withContext if (svc.click(n)) ActionResult.Success("Tapped $label.") else ActionResult.Failure("I couldn't tap $label.")
+            return@withContext if (act(n)) ActionResult.Success(done) else ActionResult.Failure("I couldn't ${if (kind == TapKind.TAP) "tap" else "press"} $target.")
         }
-        // Nothing in the accessibility tree: read the pixels and tap where the words are.
-        val line = Ocr.read(svc)?.firstOrNull { CmfAccess.norm(it.text).contains(CmfAccess.norm(label)) }
-        if (line != null && svc.tapAt(line.box.exactCenterX(), line.box.exactCenterY())) {
-            return@withContext ActionResult.Success("Tapped $label.")
+        // Nothing in the accessibility tree: read the pixels and act where the words are.
+        val line = Ocr.read(svc)?.firstOrNull { CmfAccess.norm(it.text).contains(key) }
+        if (line != null) {
+            val x = line.box.exactCenterX()
+            val y = line.box.exactCenterY()
+            val ok = when (kind) { TapKind.TAP -> svc.tapAt(x, y); TapKind.LONG -> svc.holdAt(x, y, 800); TapKind.DOUBLE -> svc.doubleTapAt(x, y) }
+            if (ok) return@withContext ActionResult.Success(done)
         }
-        ActionResult.Failure("I can't see “$label” on this screen.")
+        ActionResult.Failure("I can't see “$target” on this screen.")
+    }
+
+    suspend fun swipe(dir: SwipeDir): ActionResult = withContext(Dispatchers.Default) {
+        val svc = CmfAccess.instance ?: return@withContext needAccess("swipe")
+        clearWay(svc)
+        if (svc.swipe(dir.name.lowercase())) ActionResult.Success("Swiped ${dir.name.lowercase()}.") else ActionResult.Failure("I couldn't swipe here.")
+    }
+
+    suspend fun zoom(zoomIn: Boolean): ActionResult = withContext(Dispatchers.Default) {
+        val svc = CmfAccess.instance ?: return@withContext needAccess("zoom")
+        clearWay(svc)
+        if (svc.pinch(zoomIn)) ActionResult.Success(if (zoomIn) "Zoomed in." else "Zoomed out.") else ActionResult.Failure("I couldn't zoom here.")
+    }
+
+    suspend fun clip(op: ClipOp): ActionResult = withContext(Dispatchers.Default) {
+        val svc = CmfAccess.instance ?: return@withContext needAccess("edit text")
+        clearWay(svc)
+        val ok = svc.clip(op.name.lowercase())
+        if (ok) ActionResult.Success(when (op) { ClipOp.SELECT_ALL -> "Selected all."; ClipOp.COPY -> "Copied."; ClipOp.PASTE -> "Pasted."; ClipOp.CUT -> "Cut." })
+        else ActionResult.Failure("There's no text box I can do that in.")
+    }
+
+    suspend fun enter(): ActionResult = withContext(Dispatchers.Default) {
+        val svc = CmfAccess.instance ?: return@withContext needAccess("press enter")
+        clearWay(svc)
+        if (svc.imeEnter()) ActionResult.Success("Done.")
+        else svc.findSend()?.let { if (svc.click(it)) ActionResult.Success("Done.") else null }
+            ?: ActionResult.Failure("I couldn't find an enter key here.")
+    }
+
+    suspend fun scrollEdge(top: Boolean): ActionResult = withContext(Dispatchers.Default) {
+        val svc = CmfAccess.instance ?: return@withContext needAccess("scroll")
+        clearWay(svc)
+        if (svc.scrollEdge(top)) ActionResult.Success(if (top) "At the top." else "At the bottom.") else ActionResult.Failure("Nothing to scroll here.")
+    }
+
+    // ---- Doing things inside whatever app is open ----
+
+    /** Gets our own window out of the way. Call before a run of steps. */
+    suspend fun prepare() {
+        val svc = CmfAccess.instance ?: return
+        clearWay(svc)
+    }
+
+    /** After launching something, waits (up to 3 s) until a different app is in front and has drawn. */
+    suspend fun settleAfterLaunch(previous: String) {
+        val svc = CmfAccess.instance ?: return
+        val end = System.currentTimeMillis() + 3200
+        delay(220)
+        while (System.currentTimeMillis() < end) {
+            val now = svc.frontPackage()
+            if (now.isNotEmpty() && now != previous && now != app.packageName) break
+            delay(80)
+        }
+        delay(350)
+    }
+
+    fun frontPackage(): String = CmfAccess.instance?.frontPackage().orEmpty()
+
+    /** Finds the search box (or the search icon and opens it), types [query], submits, and optionally opens the best result. */
+    suspend fun search(query: String, pick: Boolean): ActionResult = withContext(Dispatchers.Default) {
+        val svc = CmfAccess.instance ?: return@withContext needAccess("search in apps")
+        clearWay(svc)
+        AppLog.d("ui", "search '$query' pick=$pick in ${svc.frontPackage()}")
+        val trig = svc.waitSearch(2200) ?: return@withContext ActionResult.Failure("I can't find a search box on this screen.")
+        if (!trig.second) {
+            svc.click(trig.first)
+            delay(220)
+        } else {
+            svc.click(trig.first)
+            delay(120)
+        }
+        val field = svc.waitEditable(1800) ?: return@withContext ActionResult.Failure("I tapped search, but no text box showed up.")
+        svc.click(field)
+        delay(80)
+        if (!svc.setText(query)) return@withContext ActionResult.Failure("I couldn't type into the search box.")
+        delay(220)
+        if (!svc.imeEnter()) {
+            svc.find(listOf("Search"))?.takeIf { !it.isEditable }?.let { svc.click(it) }
+        }
+        if (!pick) return@withContext ActionResult.Success("Searched for $query.")
+        // Wait for results to show, then open the closest match.
+        var hit: android.view.accessibility.AccessibilityNodeInfo? = null
+        val end = System.currentTimeMillis() + 2600
+        while (System.currentTimeMillis() < end && hit == null) {
+            delay(150)
+            hit = svc.bestMatch(query)
+        }
+        val node = hit ?: return@withContext ActionResult.Failure("I searched for $query but couldn't see a matching result.")
+        if (svc.click(node)) {
+            delay(500)
+            ActionResult.Success("Opened $query.")
+        } else ActionResult.Failure("I found $query but couldn't open it.")
+    }
+
+    /** Types [body] into the message box and presses Send. */
+    suspend fun send(body: String): ActionResult = withContext(Dispatchers.Default) {
+        val svc = CmfAccess.instance ?: return@withContext needAccess("send messages")
+        clearWay(svc)
+        val field = svc.waitEditable(2000) ?: return@withContext ActionResult.Failure("I can't find the message box.")
+        svc.click(field)
+        delay(80)
+        if (!svc.setText(body)) return@withContext ActionResult.Failure("I couldn't type the message.")
+        delay(250)
+        val send = svc.waitFind(listOf("Send", "Send message", "Send button"), 1200)
+        val ok = if (send != null) svc.click(send) else svc.imeEnter()
+        if (ok) ActionResult.Success("Sent.") else ActionResult.Failure("I typed the message but couldn't find Send.")
+    }
+
+    suspend fun message(contact: String, body: String): ActionResult {
+        val found = search(contact, pick = true)
+        if (found is ActionResult.Failure) return found
+        delay(700)
+        return send(body)
+    }
+
+    // ---- Camera ----
+
+    suspend fun takePhoto(selfie: Boolean): ActionResult = withContext(Dispatchers.Default) {
+        val svc = CmfAccess.instance
+        if (svc == null) {
+            // Without screen control the best I can do is open the camera.
+            return@withContext ActionResult.Success("Opening the camera. I need Accessibility access to press the shutter for you.") {
+                launch(Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA))
+            }
+        }
+        takePhotoNow(svc, selfie, openCamera = true)
+    }
+
+    private suspend fun takePhotoNow(svc: CmfAccess, selfie: Boolean, openCamera: Boolean): ActionResult {
+        val front = svc.frontPackage()
+        val inCamera = front.contains("camera", ignoreCase = true)
+        if (openCamera && !inCamera) {
+            val before = front
+            if (!launch(Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA))) {
+                return ActionResult.Failure("I couldn't open the camera.")
+            }
+            settleAfterLaunch(before)
+        }
+        clearWay(svc)
+        if (selfie) {
+            svc.waitFind(listOf("Switch camera", "Flip camera", "Switch to front camera", "Selfie", "Front camera", "Rotate camera", "Switch cameras"), 1200)?.let {
+                svc.click(it)
+                delay(700)
+            }
+        }
+        val shutter = svc.findShutter() ?: svc.waitShutter(2500)
+        if (shutter == null) {
+            val dm = app.resources.displayMetrics
+            if (svc.tapAt(dm.widthPixels / 2f, dm.heightPixels * 0.88f)) {
+                return ActionResult.Success("I couldn't see the shutter button, so I tapped where it usually is.")
+            }
+            return ActionResult.Failure("I couldn't find the shutter button.")
+        }
+        if (selfie) delay(1500) // a moment to get ready
+        val ok = svc.click(shutter)
+        delay(500)
+        return if (ok) ActionResult.Success(if (selfie) "Selfie taken." else "Photo taken.") else ActionResult.Failure("I couldn't press the shutter.")
     }
 
     /** "Can you find the search bar?": says whether it is there and where. */
@@ -315,7 +508,7 @@ class UiControl(context: Context) {
         val svc = CmfAccess.instance ?: return@withContext needAccess("look at the screen")
         clearWay(svc)
         val clean = label.removePrefix("the ").removePrefix("a ").trim()
-        val node = if (isSearchLabel(clean)) svc.findEditable() ?: svc.find(listOf("Search"))
+        val node = if (isSearchLabel(clean)) svc.findEditable() ?: svc.findSearchTrigger()?.first ?: svc.find(listOf("Search"))
         else svc.find(listOf(clean.removeSuffix(" button").removeSuffix(" icon").removeSuffix(" option").removeSuffix(" tab"))) ?: svc.scrollToFind(listOf(clean), 5)
         if (node != null) return@withContext ActionResult.Success("Yes, I can see ${if (isSearchLabel(clean)) "a search box" else clean} ${svc.where(node)}. Say tap $clean and I'll press it.")
         val line = Ocr.read(svc)?.firstOrNull { CmfAccess.norm(it.text).contains(CmfAccess.norm(clean)) }

@@ -54,6 +54,17 @@ class PanelActivity : ComponentActivity() {
             return true
         }
 
+        /** Brings the panel back over whatever app is in front, already listening-ready (used between tasks). */
+        fun show(ctx: android.content.Context) {
+            runCatching {
+                ctx.startActivity(
+                    Intent(ctx, PanelActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                        .putExtra("quiet", true)
+                )
+            }
+        }
+
         fun closeIfOpen(): Boolean {
             val p = current ?: return false
             if (p.isFinishing || p.isDestroyed) return false
@@ -66,6 +77,7 @@ class PanelActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (routeToMain()) return
+        autoStart = !intent.getBooleanExtra("quiet", false)
         current = this
         enableEdgeToEdge()
         setContent { Root() }
@@ -75,7 +87,7 @@ class PanelActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (routeToMain()) return
-        autoStart = true
+        autoStart = !intent.getBooleanExtra("quiet", false)
     }
 
     /** If the full app is already on screen, listen there instead of stacking the panel on top of it. */

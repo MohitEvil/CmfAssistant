@@ -96,7 +96,17 @@ class ActionEngine(context: Context) {
         is Command.Toggle -> ui.toggle(cmd.key, cmd.on)
         is Command.SetValue -> ui.setValue(cmd.kind, cmd.value)
         is Command.GlobalAction -> ui.global(cmd.key)
-        is Command.UiTap -> ui.tap(cmd.label)
+        is Command.UiTap -> ui.tap(cmd.label, cmd.kind)
+        is Command.UiSwipe -> ui.swipe(cmd.dir)
+        is Command.UiZoom -> ui.zoom(cmd.zoomIn)
+        is Command.UiClip -> ui.clip(cmd.op)
+        is Command.UiScrollEdge -> ui.scrollEdge(cmd.top)
+        Command.UiEnter -> ui.enter()
+        is Command.UiSearch -> ui.search(cmd.query, cmd.pick)
+        is Command.UiSend -> ui.send(cmd.body)
+        is Command.UiMessage -> ui.message(cmd.contact, cmd.body)
+        is Command.TakePhoto -> ui.takePhoto(cmd.selfie)
+        is Command.Chain -> runChain(cmd)
         is Command.UiType -> ui.type(cmd.text)
         is Command.UiScroll -> ui.scroll(cmd.forward)
         is Command.UiFind -> ui.find(cmd.label)
@@ -107,8 +117,37 @@ class ActionEngine(context: Context) {
         else -> run(cmd)
     }
 
+    /** Shown in the status line while a chain works through its steps. */
+    var onProgress: ((String) -> Unit)? = null
+
+    /** Runs the steps one after another. If one gets stuck, says exactly where and asks what to do next. */
+    private suspend fun runChain(c: Command.Chain): ActionResult {
+        var last = "Done."
+        for ((i, step) in c.steps.withIndex()) {
+            onProgress?.invoke(step.describe())
+            var r = runSuspend(step)
+            if (r is ActionResult.Confirm) r = runSuspend(r.command) // inside a chain, take the closest match
+            when (r) {
+                is ActionResult.Success -> {
+                    last = r.message
+                    r.launch?.let { go ->
+                        val before = ui.frontPackage()
+                        go()
+                        ui.settleAfterLaunch(before)
+                    }
+                }
+                is ActionResult.Failure -> {
+                    val done = if (i == 0) "I couldn't do the first step." else "I got through $i of ${c.steps.size} steps."
+                    return ActionResult.Failure("$done I'm stuck at: ${step.describe().trimEnd('…')}. ${r.message} Tell me what to tap, or what to do next.")
+                }
+                else -> Unit
+            }
+        }
+        return ActionResult.Success(last)
+    }
+
     /** True for commands that take a moment because they drive another screen. */
-    fun isSlow(cmd: Command): Boolean = cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.GlobalAction ||
+    fun isSlow(cmd: Command): Boolean = cmd is Command.Screen || cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.GlobalAction ||
         cmd is Command.UiTap || cmd is Command.UiFind || cmd is Command.UiType || cmd is Command.UiScroll || cmd === Command.ReadScreen ||
         (cmd is Command.AppAction && (cmd.op == AppOp.FORCE_STOP || cmd.op == AppOp.CLEAR_CACHE))
 
@@ -176,7 +215,9 @@ class ActionEngine(context: Context) {
         is Command.PlayMusic -> playMusic(cmd)
         is Command.Reminder -> reminder(cmd)
         is Command.Toggle, is Command.SetValue, is Command.GlobalAction, is Command.UiTap,
-        is Command.UiType, is Command.UiScroll, Command.ReadScreen, is Command.UiFind ->
+        is Command.UiType, is Command.UiScroll, Command.ReadScreen, is Command.UiFind, is Command.UiSwipe, is Command.UiZoom,
+        is Command.UiClip, is Command.UiScrollEdge, Command.UiEnter, is Command.UiSearch, is Command.UiSend, is Command.UiMessage,
+        is Command.TakePhoto, is Command.Chain ->
             ActionResult.Failure("That needs the screen-control service.")
         is Command.Question, is Command.Unknown -> ActionResult.Failure("I don't know how to do that yet.")
     }
