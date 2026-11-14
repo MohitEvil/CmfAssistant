@@ -65,6 +65,7 @@ class ActionEngine(context: Context) {
     private val audio = app.getSystemService(AudioManager::class.java)
 
     val system = SystemActions(app)
+    private val ui = UiControl(app)
 
     private var torchOn = false
 
@@ -79,6 +80,7 @@ class ActionEngine(context: Context) {
     }
 
     init {
+        Thread { runCatching { appIndex() } }.start() // warm the app list so the first "open X" is instant
         // Keeps torchOn in sync when the user toggles the torch elsewhere (quick settings, etc).
         runCatching {
             cameraManager.registerTorchCallback(object : CameraManager.TorchCallback() {
@@ -89,9 +91,49 @@ class ActionEngine(context: Context) {
         }
     }
 
+    /** Commands that wait on other apps' screens run here, off the main thread. Everything else is instant. */
+    suspend fun runSuspend(cmd: Command): ActionResult = when (cmd) {
+        is Command.Toggle -> ui.toggle(cmd.key, cmd.on)
+        is Command.SetValue -> ui.setValue(cmd.kind, cmd.value)
+        is Command.GlobalAction -> ui.global(cmd.key)
+        is Command.UiTap -> ui.tap(cmd.label)
+        is Command.UiType -> ui.type(cmd.text)
+        is Command.UiScroll -> ui.scroll(cmd.forward)
+        is Command.UiFind -> ui.find(cmd.label)
+        Command.ReadScreen -> ui.readScreen()
+        Command.LockScreen -> ui.lockScreen() ?: system.lock()
+        is Command.AppAction ->
+            if (cmd.op == AppOp.FORCE_STOP || cmd.op == AppOp.CLEAR_CACHE) appTask(cmd) else run(cmd)
+        else -> run(cmd)
+    }
+
+    /** True for commands that take a moment because they drive another screen. */
+    fun isSlow(cmd: Command): Boolean = cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.GlobalAction ||
+        cmd is Command.UiTap || cmd is Command.UiFind || cmd is Command.UiType || cmd is Command.UiScroll || cmd === Command.ReadScreen ||
+        (cmd is Command.AppAction && (cmd.op == AppOp.FORCE_STOP || cmd.op == AppOp.CLEAR_CACHE))
+
+    private suspend fun appTask(c: Command.AppAction): ActionResult {
+        val hit: AppHit = if (c.pkg != null) {
+            AppHit(c.pkg, runCatching { app.packageManager.getApplicationLabel(app.packageManager.getApplicationInfo(c.pkg, 0)).toString() }.getOrDefault(c.name), true)
+        } else {
+            (findApp(c.name) ?: findApp(c.name, fuzzy = true)) ?: return ActionResult.Failure("I couldn't find an app called ${c.name}.")
+        }
+        if (!hit.exact) {
+            return ActionResult.Confirm(
+                title = (if (c.op == AppOp.FORCE_STOP) "Force stop " else "Clear cache of ") + hit.label + "?",
+                detail = "I couldn't find “${c.name}”. Closest match is ${hit.label}.",
+                spoken = "Do you mean ${hit.label}?",
+                command = c.copy(pkg = hit.pkg),
+                declineMessage = "Okay. I won't touch it."
+            )
+        }
+        return ui.appTask(c.op, hit.pkg, hit.label)
+    }
+
     fun run(cmd: Command): ActionResult = when (cmd) {
         is Command.Flashlight -> flashlight(cmd.on)
         is Command.OpenApp -> openApp(cmd.name)
+        is Command.Find -> findThing(cmd.query)
         is Command.LaunchPackage -> launchPackage(cmd.pkg, cmd.label)
         is Command.SetTimer -> setTimer(cmd.seconds)
         is Command.SetAlarm -> setAlarm(cmd.hour, cmd.minute)
@@ -131,15 +173,21 @@ class ActionEngine(context: Context) {
         } else {
             ActionResult.Failure("No camera app found")
         }
-        is Command.Question, is Command.Unknown -> ActionResult.Failure("I can't do that yet.")
+        is Command.PlayMusic -> playMusic(cmd)
+        is Command.Reminder -> reminder(cmd)
+        is Command.Toggle, is Command.SetValue, is Command.GlobalAction, is Command.UiTap,
+        is Command.UiType, is Command.UiScroll, Command.ReadScreen, is Command.UiFind ->
+            ActionResult.Failure("That needs the screen-control service.")
+        is Command.Question, is Command.Unknown -> ActionResult.Failure("I don't know how to do that yet.")
     }
 
     // ---- Settings pages and app actions, with "did you mean" confirmation ----
 
     private fun openNamedSetting(name: String): ActionResult {
         SettingsTable.exact(name)?.let { return system.openSetting(it) }
-        val close = SettingsTable.fuzzy(name)
-            ?: return ActionResult.Failure("I don't know a settings page called $name.")
+        val m = SettingsTable.resolve(name) ?: return ActionResult.Failure("I don't know a settings page called $name.")
+        if (m.score >= 0.84) return system.openSetting(m.entry)
+        val close = m.entry
         return ActionResult.Confirm(
             title = "Open ${close.label}?",
             detail = "I couldn't find “$name”. Closest match is ${close.label}.",
@@ -149,45 +197,77 @@ class ActionEngine(context: Context) {
         )
     }
 
-    private data class AppHit(val pkg: String, val label: String, val exact: Boolean)
+    private data class AppHit(val pkg: String, val label: String, val exact: Boolean, val cls: String = "")
 
-    /** Best installed app for [name]: an exact/prefix match, otherwise a similar-sounding one, otherwise null. */
-    private fun findApp(name: String): AppHit? {
+    private class AppEntry(val label: String, val norm: String, val words: List<String>, val pkg: String, val cls: String)
+
+    @Volatile private var index: List<AppEntry> = emptyList()
+    @Volatile private var indexAt = 0L
+
+    /** Launchable apps, read once and kept for two minutes so "open X" does not re-scan the phone every time. */
+    private fun appIndex(): List<AppEntry> {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (index.isEmpty() || now - indexAt > 120_000) rebuildIndex()
+        return index
+    }
+
+    private fun rebuildIndex() {
         val pm = app.packageManager
+        index = runCatching {
+            pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0).map { ri ->
+                val label = ri.loadLabel(pm).toString()
+                AppEntry(
+                    label, norm(label),
+                    label.split(Regex("[^A-Za-z0-9]+")).map { norm(it) }.filter { it.length >= 4 },
+                    ri.activityInfo.packageName, ri.activityInfo.name
+                )
+            }
+        }.getOrDefault(index)
+        indexAt = android.os.SystemClock.uptimeMillis()
+    }
+
+    /** Refreshes the list if it is more than 8 seconds old. Returns true if it did. */
+    private fun refreshIndexIfStale(): Boolean {
+        if (android.os.SystemClock.uptimeMillis() - indexAt < 8_000) return false
+        rebuildIndex()
+        return true
+    }
+
+    /** Best installed app for [name]. With [fuzzy] false only clear (exact, prefix, contains) matches count; true only close spellings. */
+    private fun findApp(name: String, fuzzy: Boolean = false): AppHit? {
         val q = alias(norm(name))
         if (q.isEmpty()) return null
-        val apps = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
-        var best: ResolveInfo? = null
-        var bestScore = 0
-        for (ri in apps) {
-            val label = norm(ri.loadLabel(pm).toString())
-            val score = when {
-                label == q -> 100
-                label.startsWith(q) -> 80
-                label.length >= 3 && q.startsWith(label) -> 70
-                label.contains(q) -> 60
-                else -> 0
+        val apps = appIndex()
+        if (!fuzzy) {
+            var best: AppEntry? = null
+            var bestScore = 0
+            for (e in apps) {
+                val score = when {
+                    e.norm == q -> 100
+                    e.norm.startsWith(q) -> 80
+                    e.norm.length >= 3 && q.startsWith(e.norm) -> 70
+                    e.norm.contains(q) -> 60
+                    else -> 0
+                }
+                if (score > bestScore) { best = e; bestScore = score }
             }
-            if (score > bestScore) { best = ri; bestScore = score }
+            return best?.let { AppHit(it.pkg, it.label, true, it.cls) }
         }
-        if (best != null) return AppHit(best.activityInfo.packageName, best.loadLabel(pm).toString(), true)
         if (q.length < 4) return null
-        var close: ResolveInfo? = null
+        var close: AppEntry? = null
         var closeScore = 0.0
-        for (ri in apps) {
-            val full = ri.loadLabel(pm).toString()
-            val candidates = listOf(norm(full)) + full.split(Regex("[^A-Za-z0-9]+")).map { norm(it) }.filter { it.length >= 4 }
-            val sim = candidates.maxOf { similarity(q, it) }
-            if (sim > closeScore) { close = ri; closeScore = sim }
+        for (e in apps) {
+            val sim = (listOf(e.norm) + e.words).maxOf { Fuzzy.similarity(q, it) }
+            if (sim > closeScore) { close = e; closeScore = sim }
         }
-        return if (close != null && closeScore >= 0.68) AppHit(close.activityInfo.packageName, close.loadLabel(pm).toString(), false) else null
+        return if (close != null && closeScore >= 0.68) AppHit(close.pkg, close.label, false, close.cls) else null
     }
 
     private fun appAction(c: Command.AppAction): ActionResult {
         val hit: AppHit = if (c.pkg != null) {
             AppHit(c.pkg, runCatching { app.packageManager.getApplicationLabel(app.packageManager.getApplicationInfo(c.pkg, 0)).toString() }.getOrDefault(c.name), true)
         } else {
-            findApp(c.name) ?: return ActionResult.Failure("I couldn't find an app called ${c.name}.")
+            (findApp(c.name) ?: findApp(c.name, fuzzy = true)) ?: return ActionResult.Failure("I couldn't find an app called ${c.name}.")
         }
         if (!hit.exact) {
             return ActionResult.Confirm(
@@ -205,6 +285,7 @@ class ActionEngine(context: Context) {
             AppOp.UNINSTALL -> ActionResult.Success("Opening the uninstall prompt for ${hit.label}. Confirm it there.") {
                 launch(Intent(Intent.ACTION_DELETE, Uri.parse("package:${hit.pkg}")))
             }
+            else -> ActionResult.Failure("Not something I can do here.")
         }
     }
 
@@ -295,67 +376,62 @@ class ActionEngine(context: Context) {
     }
 
     private fun openApp(name: String): ActionResult {
-        val pm = app.packageManager
-        val q = alias(norm(name))
+        val cleaned = com.demon.cmfassistant.intent.Canon.phrase(name).removePrefix("the ").removeSuffix(" app").trim()
+        val q = alias(norm(cleaned))
         if (q.isEmpty()) return ActionResult.Failure("Which app should I open?")
 
-        val apps = pm.queryIntentActivities(
-            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0
-        )
-
-        // 1) A clear match opens straight away.
-        var best: ResolveInfo? = null
-        var bestScore = 0
-        for (ri in apps) {
-            val label = norm(ri.loadLabel(pm).toString())
-            val score = when {
-                label == q -> 100
-                label.startsWith(q) -> 80
-                label.length >= 3 && q.startsWith(label) -> 70
-                label.contains(q) -> 60
-                else -> 0
-            }
-            if (score > bestScore) {
-                best = ri
-                bestScore = score
-            }
+        // 1) A clear app match opens straight away.
+        var hit = findApp(cleaned, fuzzy = false)
+        val page = SettingsTable.resolve(cleaned)
+        if (hit == null) {
+            // 2) A Settings page, even when speech spelled it differently ("wi-fi", "developer option").
+            if (page != null && page.score >= 0.84) return system.openSetting(page.entry)
+            // 3) The app may have been installed a moment ago: refresh the list once.
+            if (refreshIndexIfStale()) hit = findApp(cleaned, fuzzy = false)
         }
-        if (best != null) return launchResolved(best)
+        if (hit != null) return launchHit(hit)
 
-        // 2) Otherwise look for a similar name (speech often mishears: "namita" vs "namida") and ask.
-        var close: ResolveInfo? = null
-        var closeScore = 0.0
-        if (q.length >= 4) {
-            for (ri in apps) {
-                val full = ri.loadLabel(pm).toString()
-                val candidates = listOf(norm(full)) +
-                    full.split(Regex("[^A-Za-z0-9]+")).map { norm(it) }.filter { it.length >= 4 }
-                val sim = candidates.maxOf { similarity(q, it) }
-                if (sim > closeScore) {
-                    close = ri
-                    closeScore = sim
-                }
-            }
-        }
-        if (close != null && closeScore >= 0.68) {
-            val label = close.loadLabel(pm).toString()
+        // 4) A similar-sounding app. Ask before opening it.
+        findApp(cleaned, fuzzy = true)?.let { close ->
             return ActionResult.Confirm(
-                title = "Open $label?",
-                detail = "I couldn't find “$name”. Closest match is $label.",
-                spoken = "Do you mean $label?",
-                command = Command.LaunchPackage(close.activityInfo.packageName, label),
-                declineMessage = "Okay. I couldn't find an app called $name."
+                title = "Open ${close.label}?",
+                detail = "I couldn't find “$name”. Closest match is ${close.label}.",
+                spoken = "Do you mean ${close.label}?",
+                command = Command.LaunchPackage(close.pkg, close.label),
+                declineMessage = "Okay."
             )
         }
-        return ActionResult.Failure("I couldn't find an app called $name")
+        // 5) Or a similar Settings page.
+        if (page != null) {
+            return ActionResult.Confirm(
+                title = "Open ${page.entry.label}?",
+                detail = "I couldn't find “$name”. Closest match is ${page.entry.label} settings.",
+                spoken = "Do you mean ${page.entry.label} settings?",
+                command = Command.OpenSetting(page.entry.key),
+                declineMessage = "Okay. I won't open anything."
+            )
+        }
+        return ActionResult.Failure("I couldn't find $name on this phone.")
     }
 
-    private fun launchResolved(ri: ResolveInfo): ActionResult {
-        val label = ri.loadLabel(app.packageManager).toString()
+    /** "Find X": the app or setting if there is one, otherwise offer a web search. */
+    private fun findThing(query: String): ActionResult {
+        val r = openApp(query)
+        if (r !is ActionResult.Failure) return r
+        return ActionResult.Confirm(
+            title = "Search the web?",
+            detail = "I couldn't find “$query” on this phone.",
+            spoken = "I couldn't find $query on this phone. Want me to search the web for it?",
+            command = Command.Search(query),
+            declineMessage = "Okay."
+        )
+    }
+
+    private fun launchHit(hit: AppHit): ActionResult {
         val intent = Intent(Intent.ACTION_MAIN)
             .addCategory(Intent.CATEGORY_LAUNCHER)
-            .setClassName(ri.activityInfo.packageName, ri.activityInfo.name)
-        return ActionResult.Success("Opening $label.") { launch(intent) }
+            .setClassName(hit.pkg, hit.cls)
+        return ActionResult.Success("Opening ${hit.label}.") { launch(intent) }
     }
 
     private fun launchPackage(pkg: String, label: String): ActionResult {
@@ -381,13 +457,7 @@ class ActionEngine(context: Context) {
     }
 
     /** Names of launchable apps, used to render "Opening <app>." ahead of time for the offline voice. */
-    fun appLabels(): List<String> = runCatching {
-        val pm = app.packageManager
-        pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
-            .map { it.loadLabel(pm).toString() }
-            .filter { it.length in 2..20 }
-            .distinct()
-    }.getOrDefault(emptyList())
+    fun appLabels(): List<String> = appIndex().map { it.label }.filter { it.length in 2..20 }.distinct()
 
     /** Several ways to say the same thing, so replies sound like a person rather than an echo of the command. */
     private fun pick(vararg options: String): String = options.random()
@@ -529,6 +599,32 @@ class ActionEngine(context: Context) {
             SettingsPage.GENERAL -> Intent(Settings.ACTION_SETTINGS) to "Here are your settings."
         }
         return if (launch(intent)) ActionResult.Success(message) else ActionResult.Failure("Couldn't open settings")
+    }
+
+    private fun playMusic(c: Command.PlayMusic): ActionResult {
+        val pkg = c.app?.let { (findApp(it) ?: findApp(it, fuzzy = true))?.pkg }
+        val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+            .putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
+            .putExtra(SearchManager.QUERY, c.query)
+        if (pkg != null) intent.setPackage(pkg)
+        val msg = pick("Playing ${c.query}.", "Putting on ${c.query}.", "Here's ${c.query}.")
+        return ActionResult.Success(msg) {
+            if (!launch(intent)) {
+                launch(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(c.query))))
+            }
+        }
+    }
+
+    private fun reminder(c: Command.Reminder): ActionResult {
+        val intent = if (c.seconds != null) {
+            Intent(AlarmClock.ACTION_SET_TIMER).putExtra(AlarmClock.EXTRA_LENGTH, c.seconds)
+        } else {
+            Intent(AlarmClock.ACTION_SET_ALARM).putExtra(AlarmClock.EXTRA_HOUR, c.hour).putExtra(AlarmClock.EXTRA_MINUTES, c.minute)
+        }.putExtra(AlarmClock.EXTRA_MESSAGE, c.text).putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+        if (!launch(intent)) return ActionResult.Failure("No clock app can set reminders")
+        val whenText = if (c.seconds != null) "in ${formatDuration(c.seconds)}" else "at " +
+            SimpleDateFormat("h:mm a", Locale.getDefault()).format(Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, c.hour); set(Calendar.MINUTE, c.minute) }.time)
+        return ActionResult.Success("Okay, I'll remind you to ${c.text} $whenText.")
     }
 
     // ---- Helpers ----

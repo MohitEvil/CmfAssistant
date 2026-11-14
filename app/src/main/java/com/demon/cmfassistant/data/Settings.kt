@@ -24,7 +24,9 @@ data class Provider(
     val model: String,
     val key: String,
     val locked: Boolean = false,
-    val custom: Boolean = false
+    val custom: Boolean = false,
+    /** Voice providers only: the voice name or id to speak with. */
+    val extra: String = ""
 ) {
     /** Has everything needed to make a request. Providers that aren't ready are skipped. */
     val ready: Boolean get() = key.isNotBlank() && model.isNotBlank() && baseUrl.isNotBlank()
@@ -44,6 +46,17 @@ object AiPresets {
     )
 
     fun byId(id: String): Preset = all.firstOrNull { it.id == id } ?: all.first()
+}
+
+/** Ready-made settings for cloud text-to-speech providers. */
+object VoicePresets {
+    data class Preset(val id: String, val name: String, val baseUrl: String, val model: String, val voice: String)
+
+    val all = listOf(
+        Preset("v_openai", "OPENAI", "https://api.openai.com/v1", "gpt-4o-mini-tts", "alloy"),
+        Preset("v_groq", "GROQ", "https://api.groq.com/openai/v1", "canopylabs/orpheus-v1-english", "hannah"),
+        Preset("v_eleven", "ELEVENLABS", "https://api.elevenlabs.io/v1", "eleven_flash_v2_5", "21m00Tcm4TlvDq8ikWAM")
+    )
 }
 
 /** How the AI should behave. The default is a quiet, minimal assistant that is good at small talk. */
@@ -128,8 +141,17 @@ class Settings(context: Context) {
     var voiceSpeed by mutableStateOf(sp.getFloat("voice_speed", 1.15f))
         private set
 
+    // AI voice (cloud text-to-speech), off by default
+    var aiVoiceEnabled by mutableStateOf(sp.getBoolean("ai_voice_enabled", false))
+        private set
+    val voiceProviders = mutableStateListOf<Provider>().also { it.addAll(loadVoiceProviders()) }
+
+    // What the assistant calls you (learned from "my name is ...")
+    var userName by mutableStateOf(sp.getString("user_name", "") ?: "")
+        private set
+
     // Master switch for AI chat
-    var aiEnabled by mutableStateOf(sp.getBoolean("ai_enabled", true))
+    var aiEnabled by mutableStateOf(sp.getBoolean("ai_enabled", false))
         private set
 
     // AI thinking mode (off = faster replies)
@@ -149,6 +171,64 @@ class Settings(context: Context) {
         voiceSid = sid
         sp.edit().putString("voice_model", id).putInt("voice_sid", sid).apply()
     }
+    @JvmName("applyAiVoiceEnabled")
+    fun setAiVoiceEnabled(v: Boolean) { aiVoiceEnabled = v; sp.edit().putBoolean("ai_voice_enabled", v).apply() }
+
+    private fun loadVoiceProviders(): List<Provider> {
+        val raw = sp.getString("ai_voice_providers", null)
+        if (raw != null) {
+            val out = ArrayList<Provider>()
+            runCatching {
+                val arr = JSONArray(raw)
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    out.add(Provider(o.getString("id"), o.optString("name"), o.optString("base"), o.optString("model"), o.optString("key"), o.optBoolean("locked"), o.optBoolean("custom"), o.optString("extra")))
+                }
+            }
+            if (out.isNotEmpty()) return out
+        }
+        return VoicePresets.all.map { Provider(it.id, it.name, it.baseUrl, it.model, "", extra = it.voice) }
+    }
+
+    private fun persistVoiceProviders() {
+        val arr = JSONArray()
+        voiceProviders.forEach {
+            arr.put(JSONObject().put("id", it.id).put("name", it.name).put("base", it.baseUrl).put("model", it.model).put("key", it.key).put("locked", it.locked).put("custom", it.custom).put("extra", it.extra))
+        }
+        sp.edit().putString("ai_voice_providers", arr.toString()).apply()
+    }
+
+    fun updateVoiceProvider(id: String, change: (Provider) -> Provider) {
+        val i = voiceProviders.indexOfFirst { it.id == id }
+        if (i < 0) return
+        voiceProviders[i] = change(voiceProviders[i])
+        persistVoiceProviders()
+    }
+
+    fun moveVoiceProvider(id: String, delta: Int) {
+        val i = voiceProviders.indexOfFirst { it.id == id }
+        val j = i + delta
+        if (i < 0 || j < 0 || j >= voiceProviders.size) return
+        val p = voiceProviders.removeAt(i)
+        voiceProviders.add(j, p)
+        persistVoiceProviders()
+    }
+
+    fun addCustomVoiceProvider(name: String): String {
+        val id = "vcustom_" + System.currentTimeMillis()
+        voiceProviders.add(Provider(id, name.trim().uppercase().ifBlank { "CUSTOM" }, "", "", "", custom = true))
+        persistVoiceProviders()
+        return id
+    }
+
+    fun removeVoiceProvider(id: String) {
+        voiceProviders.removeAll { it.id == id && it.custom }
+        persistVoiceProviders()
+    }
+
+    @JvmName("applyUserName")
+    fun setUserName(v: String) { userName = v; sp.edit().putString("user_name", v).apply() }
+
     @JvmName("applyAiEnabled")
     fun setAiEnabled(v: Boolean) { aiEnabled = v; sp.edit().putBoolean("ai_enabled", v).apply() }
 

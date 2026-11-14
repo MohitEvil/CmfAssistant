@@ -11,9 +11,13 @@ object IntentEngine {
     private val R = RegexOption.IGNORE_CASE
 
     private val leadIn = Regex(
-        "^(?:(?:hey|ok|okay)\\s+(?:cmf|nothing|google)\\s*,?\\s*)?(?:(?:please|can you|could you|would you)\\s+)*",
+        "^(?:(?:hey|ok|okay|hi|yo|hello)\\s+(?:cmf|nothing|google|assistant|siri|alexa)\\s*,?\\s*)?" +
+            "(?:(?:please|pls|can you|could you|would you|will you|can u|could u|can we|i want you to|i want to|i wanna|" +
+            "i need you to|i need to|i would like to|i'd like to|id like to|lets|let's|let us|go ahead and|just|kindly|so|um|uh|" +
+            "hey|ok|okay|and|now|then|you can|you could|you should)\\s+)*",
         R
     )
+    private val trailer = Regex("\\s+(?:please|pls|now|for me|right now|quickly|real quick|thanks|thank you)$", R)
 
     private val numberWords = mapOf(
         "a" to 1, "an" to 1, "one" to 1, "two" to 2, "three" to 3, "four" to 4, "five" to 5,
@@ -52,8 +56,9 @@ object IntentEngine {
             .replace(Regex("[.!?]+$"), "")
         s = leadIn.replace(s, "").trim()
         s = s.replace(Regex("\\s+"), " ")
+        s = trailer.replace(s, "").trim()
         if (s.isEmpty()) return Command.Unknown(raw)
-        val l = s.lowercase().replace("'", "")
+        val l = Canon.phrase(s.replace(',', ' '))
 
         // Flashlight
         if (flashlightWord.containsMatchIn(l)) {
@@ -67,6 +72,7 @@ object IntentEngine {
 
         // Phone controls: brightness, rotation, DND, ringer, settings pages, notifications and more
         SystemIntents.parse(s, l)?.let { return it }
+        ControlIntents.parse(s, l)?.let { return it }
 
         // Timer
         if (l.contains("half an hour") && l.contains("timer")) return Command.SetTimer(1800)
@@ -135,10 +141,19 @@ object IntentEngine {
         if (Regex("^(?:open )?(?:phone |system )?settings$").containsMatchIn(l)) return Command.OpenSettings(SettingsPage.GENERAL)
         if (Regex("\\bcamera\\b|\\b(?:take|click) a (?:photo|picture|selfie|pic)\\b").containsMatchIn(l)) return Command.Camera
 
+        // "find bluetooth", "look for developer options", "locate the camera app"
+        Regex("^(?:find|locate|look for|show me|search for|search)(?: me| out)?(?: the| a| an| my)? (.+?)(?: settings?| app| option| options| page)?$").find(l)?.let { m ->
+            val what = m.groupValues[1].trim()
+            if (what.isNotEmpty() && !Regex("^(?:the )?(?:web|internet|google|online|youtube)\\b").containsMatchIn(what) && !l.startsWith("search")) return Command.Find(what)
+            if (l.startsWith("search") && com.demon.cmfassistant.action.SettingsTable.resolve(what)?.let { it.score >= 0.95 } == true) return Command.Find(what)
+        }
+
         // Maps and web
         navigateRegex.find(s)?.let { m -> return Command.Navigate(m.groupValues[1].trim()) }
         searchRegex.find(s)?.let { m -> return Command.Search(m.groupValues[1].trim()) }
         if (questionRegex.matches(s)) return Command.Question(s)
+
+        ControlIntents.late(s, l)?.let { return it }
 
         // Open an app (last, because it is the most generic pattern)
         openRegex.find(l)?.let { m ->

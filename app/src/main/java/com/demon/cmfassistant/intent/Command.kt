@@ -7,7 +7,9 @@ enum class LevelAction { UP, DOWN, SET, AUTO }
 enum class VolStream { MEDIA, RING, ALARM, NOTIFICATION, CALL }
 enum class RingerMode { SILENT, VIBRATE, NORMAL }
 enum class StatusKind { STORAGE, RAM, NETWORK, WIFI, BLUETOOTH, AIRPLANE, DND, BRIGHTNESS }
-enum class AppOp { INFO, UNINSTALL }
+enum class AppOp { INFO, UNINSTALL, FORCE_STOP, CLEAR_CACHE }
+enum class GlobalKey { BACK, HOME, RECENTS, NOTIFICATIONS, QUICK_SETTINGS, SCREENSHOT, POWER_MENU, SPLIT }
+enum class ValueKind { SMALLEST_WIDTH, ANIMATION }
 
 /** Everything the assistant knows how to do. */
 sealed class Command {
@@ -164,6 +166,54 @@ sealed class Command {
 
     data object ShowAlarms : Command() {
         override fun describe() = "Opening alarms…"
+    }
+
+    /** Flip a system switch (Wi-Fi, Bluetooth, developer options, ...). on == null means toggle. */
+    data class Toggle(val key: String, val on: Boolean?) : Command() {
+        override fun describe() = "Switching it…"
+    }
+
+    data class SetValue(val kind: ValueKind, val value: String) : Command() {
+        override fun describe() = "Changing the setting…"
+    }
+
+    data class GlobalAction(val key: GlobalKey) : Command() {
+        override fun describe() = "On it…"
+    }
+
+    data class UiTap(val label: String) : Command() {
+        override fun describe() = "Tapping $label…"
+    }
+
+    data class UiType(val text: String) : Command() {
+        override fun describe() = "Typing…"
+    }
+
+    data class UiScroll(val forward: Boolean) : Command() {
+        override fun describe() = "Scrolling…"
+    }
+
+    /** "Find the search bar", "can you see a login button": looks on the current screen. */
+    data class UiFind(val label: String) : Command() {
+        override fun describe() = "Looking…"
+    }
+
+    /** "Find bluetooth", "find developer options": locates a setting or app and opens it. */
+    data class Find(val query: String) : Command() {
+        override fun describe() = "Looking for $query…"
+    }
+
+    data object ReadScreen : Command() {
+        override fun describe() = "Reading the screen…"
+    }
+
+    data class PlayMusic(val query: String, val app: String?) : Command() {
+        override fun describe() = "Finding $query…"
+    }
+
+    /** Either [seconds] from now, or at [hour]:[minute] when seconds is null. */
+    data class Reminder(val text: String, val seconds: Int?, val hour: Int, val minute: Int) : Command() {
+        override fun describe() = "Setting a reminder…"
     }
 
     /** A question or chat line that isn't a phone command. Answered by the AI, or searched on the web. */

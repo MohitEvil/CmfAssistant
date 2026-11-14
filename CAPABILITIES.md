@@ -47,3 +47,20 @@ If the match is not exact, the assistant asks "Do you mean …?" and only acts a
 ## Ideas for later
 Call-log queries (READ_CALL_LOG), location sharing, usage-access "screen time" report, shortcuts to routines
 ("good night" = DND + brightness low + alarm), accessibility-service gestures (back/home/recents/screenshot).
+
+## v-next: wider commands, background screen control, offline companion
+- Natural phrasing: "can you open wifi", "turn on developer options", "switch off bluetooth", Hinglish ("wifi chalu karo"). Toggles, settings pages and apps are resolved with fuzzy matching; AI is never used for these.
+- Toggles (Wi-Fi, Bluetooth, mobile data, hotspot, NFC, location, airplane, battery saver, auto-rotate, etc.) are driven through the Settings page by the Accessibility service using node actions (not gestures), so your touches don't cancel them.
+- Developer options: unlock (Build number x7) and toggle; "set smallest width to 444" jumps straight to the field.
+- Global actions: back, home, recents, notifications, quick settings, power menu, split screen, lock, screenshot. Plus tap/type/scroll/read screen, force stop, clear cache, play music, reminders.
+- Offline companion: greetings, moods, jokes, facts, riddles, stories, maths, coin/dice, "my name is X". AI is used only for real questions or knowledge.
+Limits: Accessibility must be enabled manually (Access screen); switch labels vary by OEM; Wi-Fi/Bluetooth cannot be toggled directly on Android 10+ without root.
+
+## Smarter matching, screen awareness, AI Voice (latest)
+- Speech clean-up: "wi-fi / why fi / wi fi" all become wifi, "d p i" -> dpi, "developer option(s)/dev options/developer mode" -> Developer options, "four four four" -> 444. The recogniser's other guesses are tried if the first isn't a command.
+- Settings and apps are matched by sound and spelling, ignoring plurals and filler words ("bluetooth settings", "developer option"). Near-certain matches open directly, doubtful ones ask "Do you mean...?".
+- "Find X" opens an app/setting, or offers a web search if nothing is found. "Where is X / how do I find X" and "what can you do" are answered offline.
+- Leaving: "go back", "go home", "exit this screen" (Back), "close the app / exit" (Home; apps can't be killed without root).
+- Screen awareness (Accessibility + on-device OCR): "what's on screen", "what can you see", "find the search bar", "tap search", "click Login". If an app exposes no text, a screenshot is read with on-device OCR.
+- Gentle declines: no mention of keys or AI unless AI is on and set up.
+- Settings > AI settings has two tabs: AI Chat and AI Voice (cloud text-to-speech with OpenAI, Groq, ElevenLabs or custom). Both are OFF by default; the offline voice is the fallback.

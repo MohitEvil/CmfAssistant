@@ -58,4 +58,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     // Unpacks the downloaded .tar.bz2 voice models.
     implementation("org.apache.commons:commons-compress:1.27.1")
+    // On-device text recognition for screens that expose no text to accessibility (games, images, some web views).
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 }

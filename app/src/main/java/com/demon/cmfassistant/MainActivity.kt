@@ -29,6 +29,7 @@ import com.demon.cmfassistant.data.ThemeMode
 import com.demon.cmfassistant.service.OverlayService
 import com.demon.cmfassistant.ui.AccessScreen
 import com.demon.cmfassistant.ui.AiScreen
+import com.demon.cmfassistant.ui.AiVoiceScreen
 import com.demon.cmfassistant.ui.AssistantScreen
 import com.demon.cmfassistant.ui.DarkPalette
 import com.demon.cmfassistant.ui.LightPalette
@@ -102,6 +103,7 @@ class MainActivity : ComponentActivity() {
         var showPersona by remember { mutableStateOf(false) }
         var showVoice by remember { mutableStateOf(false) }
         var showAi by remember { mutableStateOf(false) }
+        var showAiVoice by remember { mutableStateOf(false) }
         var showAccess by remember { mutableStateOf(false) }
         var showLog by remember { mutableStateOf(false) }
 
@@ -158,12 +160,13 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        BackHandler(enabled = showLog || showAi || showAccess || showSettings || showPersona || showVoice || ui.state != AssistantState.IDLE) {
+        BackHandler(enabled = showLog || showAi || showAiVoice || showAccess || showSettings || showPersona || showVoice || ui.state != AssistantState.IDLE) {
             when {
                 showLog -> showLog = false
                 showVoice -> showVoice = false
                 showAccess -> showAccess = false
                 showPersona -> showPersona = false
+                showAiVoice -> showAiVoice = false
                 showAi -> showAi = false
                 showSettings -> showSettings = false
                 else -> controller.cancel()
@@ -187,6 +190,14 @@ class MainActivity : ComponentActivity() {
                 onTestAi = controller::testAi,
                 onClose = { showPersona = false }
             )
+        } else if (showAiVoice) {
+            AiVoiceScreen(
+                settings = settings,
+                palette = palette,
+                onTestVoice = controller::testVoiceProvider,
+                onOpenChatTab = { showAiVoice = false; showAi = true },
+                onClose = { showAiVoice = false }
+            )
         } else if (showAi) {
             AiScreen(
                 settings = settings,
@@ -195,6 +206,7 @@ class MainActivity : ComponentActivity() {
                 onFetchModels = controller::fetchModels,
                 alwaysThinks = controller::modelAlwaysThinks,
                 onOpenPersona = { showPersona = true },
+                onOpenVoiceTab = { showAi = false; showAiVoice = true },
                 onClose = { showAi = false }
             )
         } else if (showVoice) {

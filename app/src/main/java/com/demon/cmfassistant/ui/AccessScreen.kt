@@ -74,6 +74,9 @@ fun AccessScreen(
                         .putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, android.content.ComponentName(ctx, com.demon.cmfassistant.service.AdminReceiver::class.java))
                 )
             }),
+        AccessItem("Accessibility (screen control)", "Tap, scroll and toggle Wi-Fi, Bluetooth etc. in the background",
+            { com.demon.cmfassistant.access.CmfAccess.isEnabled(ctx) },
+            { onOpenIntent(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)) }),
         AccessItem("Notification access", "Read and clear your notifications by voice",
             { system.hasNotificationAccess() },
             { onOpenIntent(android.content.Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")) }),

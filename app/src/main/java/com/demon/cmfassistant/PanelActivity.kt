@@ -46,6 +46,14 @@ class PanelActivity : ComponentActivity() {
             private set
 
         /** The floating bubble was tapped while the panel is open: stop listening and close it. Returns true if it closed one. */
+        /** Closes the panel so the app underneath gets focus (used before tapping or going back in another app). */
+        fun hide(): Boolean {
+            val p = current ?: return false
+            if (p.isFinishing || p.isDestroyed) return false
+            p.runOnUiThread { p.finish() }
+            return true
+        }
+
         fun closeIfOpen(): Boolean {
             val p = current ?: return false
             if (p.isFinishing || p.isDestroyed) return false

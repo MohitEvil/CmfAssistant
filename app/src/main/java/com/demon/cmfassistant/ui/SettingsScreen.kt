@@ -165,11 +165,10 @@ fun SettingsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("AI chat", color = palette.fg, fontSize = 15.sp)
+                    Text("AI settings", color = palette.fg, fontSize = 15.sp)
                     Text(
-                        if (!settings.aiEnabled) "Off"
-                        else settings.providers.firstOrNull { it.ready }?.let { "On · ${it.name.lowercase()} · ${it.model}" }
-                            ?: "Optional. Add a provider key and model",
+                        "Chat: " + (if (!settings.aiEnabled) "off" else settings.providers.firstOrNull { it.ready }?.let { it.name.lowercase() } ?: "on, no provider") +
+                            "  ·  Voice: " + (if (!settings.aiVoiceEnabled) "off" else settings.voiceProviders.firstOrNull { it.ready }?.let { it.name.lowercase() } ?: "on, no provider"),
                         color = palette.muted, fontSize = 12.sp
                     )
                 }

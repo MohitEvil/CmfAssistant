@@ -58,6 +58,7 @@ fun AiScreen(
     onFetchModels: suspend (Provider) -> Result<List<String>>,
     alwaysThinks: (Provider) -> Boolean,
     onOpenPersona: () -> Unit,
+    onOpenVoiceTab: () -> Unit,
     onClose: () -> Unit
 ) {
     val mono = FontFamily.Monospace
@@ -101,6 +102,8 @@ fun AiScreen(
                 modifier = Modifier.clickable(onClick = onClose).padding(vertical = 8.dp, horizontal = 4.dp)
             )
         }
+        Spacer(Modifier.height(16.dp))
+        AiTabs(0, palette, onOpenChat = {}, onOpenVoice = onOpenVoiceTab)
         Spacer(Modifier.height(20.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             DotText("AI CHAT", palette.fg, palette.dim.copy(alpha = 0.45f), 4.dp)
@@ -394,18 +397,18 @@ fun AiScreen(
 
 /** Swallows taps so nothing underneath can be touched. Scrolling still passes through. */
 @Composable
-private fun Blocker(modifier: Modifier) {
+internal fun Blocker(modifier: Modifier) {
     Box(
         modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
     )
 }
 
-private fun Modifier.matchParentSizeCompat(scope: androidx.compose.foundation.layout.BoxScope): Modifier =
+internal fun Modifier.matchParentSizeCompat(scope: androidx.compose.foundation.layout.BoxScope): Modifier =
     with(scope) { this@matchParentSizeCompat.matchParentSize() }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ProviderChip(
+internal fun ProviderChip(
     text: String,
     selected: Boolean,
     ready: Boolean,
@@ -432,7 +435,7 @@ private fun ProviderChip(
 }
 
 @Composable
-private fun SmallAction(text: String, enabled: Boolean, palette: GlyphPalette, onClick: () -> Unit) {
+internal fun SmallAction(text: String, enabled: Boolean, palette: GlyphPalette, onClick: () -> Unit) {
     Text(
         text,
         color = palette.fg,
@@ -445,4 +448,29 @@ private fun SmallAction(text: String, enabled: Boolean, palette: GlyphPalette, o
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp)
     )
+}
+
+
+/** The two tabs of AI settings. */
+@Composable
+internal fun AiTabs(selected: Int, palette: GlyphPalette, onOpenChat: () -> Unit, onOpenVoice: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        listOf("AI CHAT" to onOpenChat, "AI VOICE" to onOpenVoice).forEachIndexed { i, (name, go) ->
+            val shape = RoundedCornerShape(50)
+            Text(
+                name,
+                color = if (i == selected) palette.bg else palette.fg,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp,
+                letterSpacing = 1.sp,
+                modifier = Modifier
+                    .then(
+                        if (i == selected) Modifier.background(palette.fg, shape)
+                        else Modifier.border(BorderStroke(1.dp, palette.muted), shape)
+                    )
+                    .clickable(enabled = i != selected, onClick = go)
+                    .padding(horizontal = 18.dp, vertical = 10.dp)
+            )
+        }
+    }
 }

@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">CMF Assistant</string>
+    <string name="accessibility_description">Lets CMF Assistant tap, scroll, type and flip switches for you when you ask by voice. It only acts on your command and never reads or stores what is on screen.</string>
 </resources>

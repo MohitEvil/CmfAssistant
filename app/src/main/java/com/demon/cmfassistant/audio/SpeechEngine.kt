@@ -29,6 +29,11 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
         const val ERROR_UNAVAILABLE = -1
     }
 
+    /** The other guesses the recogniser made for the last thing it heard, best first (without the top one). */
+    @Volatile
+    var alternatives: List<String> = emptyList()
+        private set
+
     private var recognizer: SpeechRecognizer? = null
     private var generation = 0
 
@@ -62,8 +67,9 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
 
             override fun onResults(results: Bundle?) {
                 if (!live()) return
-                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
-                listener.onFinal(text)
+                val all = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+                alternatives = all.drop(1)
+                listener.onFinal(all.firstOrNull().orEmpty())
             }
 
             override fun onError(error: Int) {
@@ -76,7 +82,7 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, languageTag)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, preferOffline)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1300L)
         }

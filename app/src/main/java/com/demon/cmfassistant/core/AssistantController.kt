@@ -209,6 +209,8 @@ class AssistantController(private val context: Context, val settings: Settings) 
     fun modelAlwaysThinks(p: com.demon.cmfassistant.data.Provider): Boolean = brain.alwaysThinks(p)
 
     /** Tests one provider on its own (no fallback), so the result says exactly which one works. */
+    suspend fun testVoiceProvider(p: com.demon.cmfassistant.data.Provider): String = voice.testCloud(p)
+
     suspend fun testProvider(p: com.demon.cmfassistant.data.Provider): String {
         if (!p.ready) return "Fill in the API key, address and model first."
         val r = brain.askOne(p, emptyList(), "Say hello in five words.")
@@ -292,7 +294,11 @@ class AssistantController(private val context: Context, val settings: Settings) 
         val awaiting = awaitingMore
         awaitingMore = false
         when (val w = Wrapup.classify(raw, awaiting)) {
-            Wrapup.Result.Dismiss -> { closeConversation(); return }
+            Wrapup.Result.Dismiss -> {
+                // "Close the app" outside a wrap-up means go home; inside one it just ends the chat.
+                if (!awaiting && IntentEngine.parse(raw) is Command.GlobalAction) runCommand(raw) else closeConversation()
+                return
+            }
             Wrapup.Result.Yes -> { beginListening(Mode.FOLLOWUP); return }
             Wrapup.Result.Thanks -> { thanksReply(raw); return }
             is Wrapup.Result.Rest -> runCommand(w.text)
@@ -325,13 +331,25 @@ class AssistantController(private val context: Context, val settings: Settings) 
         }
     }
 
+    /** Speech recognition often mishears. If the top guess isn't a command, try the other guesses it offered. */
+    private fun bestParse(text: String): Command {
+        val first = IntentEngine.parse(text)
+        if (first !is Command.Unknown && first !is Command.Question) return first
+        for (alt in speech.alternatives) {
+            if (alt.equals(text, ignoreCase = true)) continue
+            val c = IntentEngine.parse(alt)
+            if (c !is Command.Unknown && c !is Command.Question) return c
+        }
+        return first
+    }
+
     private fun runCommand(text: String) {
         workJob?.cancel()
         flow++
         lastActive = SystemClock.uptimeMillis()
         workJob = scope.launch {
             transition(AssistantState.THINKING, "Understanding your request…", text)
-            when (val cmd = IntentEngine.parse(text)) {
+            when (val cmd = bestParse(text)) {
                 is Command.Unknown -> chat(text, question = false)
                 is Command.Question -> chat(text, question = true)
                 is Command.SendSms -> prepareSms(cmd, text)
@@ -342,7 +360,8 @@ class AssistantController(private val context: Context, val settings: Settings) 
 
     private suspend fun execute(cmd: Command, text: String) {
         haptics.lightTap()
-        when (val result = actions.run(cmd)) {
+        if (actions.isSlow(cmd)) transition(AssistantState.EXECUTING, cmd.describe(), text)
+        when (val result = actions.runSuspend(cmd)) {
             is ActionResult.Success -> {
                 val launch = result.launch
                 if (launch == null) success(result.message, text, askMore = !opensAnotherApp(cmd))
@@ -399,26 +418,26 @@ class AssistantController(private val context: Context, val settings: Settings) 
     // ---- Conversation ----
 
     private suspend fun chat(text: String, question: Boolean) {
+        // Questions about the phone and the assistant, chit-chat, moods, jokes and maths are answered offline, instantly.
+        // The AI is only for real knowledge questions, and only when it's switched on and set up.
+        val small = com.demon.cmfassistant.ai.Knowledge.answer(text, brain.configured())
+            ?: SmallTalk.reply(text, settings.userName) { settings.setUserName(it) }
+        if (small != null) {
+            remember(text, small)
+            respond(text, small)
+            return
+        }
         if (brain.configured()) {
             transition(AssistantState.THINKING, "Thinking…", text)
-            val result = brain.ask(history, text)
-            val reply = result.getOrNull()
+            val reply = brain.ask(history, text).getOrNull()
             if (reply != null) {
                 remember(text, reply)
                 respond(text, reply)
-            } else if (question) {
-                execute(Command.Search(text), text) // AI unreachable: fall back to a web search
-            } else {
-                fail(result.exceptionOrNull()?.message ?: "I couldn't get an answer.", text)
+                return
             }
-            return
         }
-        val small = SmallTalk.reply(text)
-        when {
-            small != null -> respond(text, small)
-            question -> execute(Command.Search(text), text)
-            else -> fail(if (settings.aiEnabled) "I can't do that yet. Add an AI key in Settings so I can chat." else "I can't do that yet. AI chat is switched off.", text)
-        }
+        // No answer I can give: decline gently and invite something else.
+        respond(text, SmallTalk.fallback(question))
     }
 
     private fun remember(user: String, reply: String) {
@@ -514,7 +533,8 @@ class AssistantController(private val context: Context, val settings: Settings) 
     private fun opensAnotherApp(c: Command) = c is Command.Search || c is Command.Navigate || c is Command.Call ||
         c is Command.ComposeSms || c === Command.Camera || c is Command.OpenSettings || c is Command.OpenSetting ||
         c is Command.OpenUrl || c is Command.Email || c is Command.AddEvent || c === Command.Wallpaper ||
-        c === Command.ShowAlarms || c is Command.OpenApp || c is Command.LaunchPackage
+        c === Command.ShowAlarms || c is Command.OpenApp || c is Command.LaunchPackage || c is Command.PlayMusic ||
+        c is Command.UiTap || c is Command.UiFind || c is Command.UiType || c is Command.UiScroll || c is Command.GlobalAction || c === Command.ReadScreen
 
     private fun success(message: String, transcript: String, askMore: Boolean = false) {
         val token = ++flow

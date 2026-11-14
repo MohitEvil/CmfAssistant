@@ -15,6 +15,7 @@ class VoiceHub(context: Context, private val settings: Settings) : Voice {
     val system = SpeechOut(context, settings)
     val neural = NeuralVoice(context)
     val manager = VoiceManager(context)
+    private val cloud = CloudVoice(context, settings)
 
     private val main = Handler(Looper.getMainLooper())
 
@@ -27,7 +28,7 @@ class VoiceHub(context: Context, private val settings: Settings) : Voice {
         get() = system.available || neural.phase == NeuralVoice.Phase.READY
 
     override val isSpeaking: Boolean
-        get() = neural.speaking || system.isSpeaking
+        get() = neural.speaking || system.isSpeaking || cloud.speaking
 
     private val guard = context.getSharedPreferences("voice_guard", Context.MODE_PRIVATE)
 
@@ -89,6 +90,18 @@ class VoiceHub(context: Context, private val settings: Settings) : Voice {
     override fun speak(raw: String, onDone: () -> Unit) = speak(raw, {}, onDone)
 
     override fun speak(raw: String, onStart: () -> Unit, onDone: () -> Unit) {
+        if (cloud.configured()) {
+            system.stop()
+            neural.stop()
+            val clean = com.demon.cmfassistant.ai.TextClean.forSpeech(raw)
+            if (clean.isBlank()) { main.post { onStart(); onDone() }; return }
+            cloud.speak(clean, onStart, onDone, onFail = { AppLog.d("voice", "AI voice failed, using the offline voice"); localSpeak(raw, onStart, onDone) })
+            return
+        }
+        localSpeak(raw, onStart, onDone)
+    }
+
+    private fun localSpeak(raw: String, onStart: () -> Unit, onDone: () -> Unit) {
         val devanagari = raw.any { it in 'ऀ'..'ॿ' }
         val model = selectedModel()
         if (settings.voiceEngine == "neural" && neural.phase == NeuralVoice.Phase.READY && (!devanagari || model?.hindi == true)) {
@@ -106,7 +119,10 @@ class VoiceHub(context: Context, private val settings: Settings) : Voice {
         system.speak(raw, onStart, onDone)
     }
 
+    suspend fun testCloud(p: com.demon.cmfassistant.data.Provider): String = cloud.test(p)
+
     override fun stop() {
+        cloud.stop()
         neural.stop()
         system.stop()
     }
