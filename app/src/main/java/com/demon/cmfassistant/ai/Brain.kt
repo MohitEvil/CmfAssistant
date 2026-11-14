@@ -1,6 +1,7 @@
 package com.demon.cmfassistant.ai
 
 import com.demon.cmfassistant.data.PersonaPresets
+import com.demon.cmfassistant.data.Provider
 import com.demon.cmfassistant.data.Settings
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -26,24 +27,34 @@ class Brain(private val settings: Settings) {
 
     private class Reply(val code: Int, val body: String)
 
-    fun configured(): Boolean =
-        settings.aiEnabled && settings.aiKey.isNotBlank() && settings.aiModel.isNotBlank() && settings.aiBaseUrl.isNotBlank()
+    fun configured(): Boolean = settings.aiEnabled && settings.providers.any { it.ready }
 
-    suspend fun ask(history: List<Turn>, userText: String): Result<String> = withContext(Dispatchers.IO) {
+    /** Tries each ready provider in order and uses the first that answers. */
+    suspend fun ask(history: List<Turn>, userText: String): Result<String> {
+        var last: Result<String> = Result.failure(BrainException("No AI provider is set up."))
+        for (p in settings.providers.toList().filter { it.ready }) {
+            val r = askOne(p, history, userText)
+            if (r.isSuccess) return r
+            last = r
+        }
+        return last
+    }
+
+    suspend fun askOne(p: Provider, history: List<Turn>, userText: String): Result<String> = withContext(Dispatchers.IO) {
         try {
-            Result.success(call(history, userText))
+            Result.success(call(p, history, userText))
         } catch (e: CancellationException) {
             throw e
         } catch (e: BrainException) {
             Result.failure(e)
         } catch (e: java.net.UnknownHostException) {
-            Result.failure(BrainException("No internet, or the AI address can't be found. Check ADDRESS in Settings."))
+            Result.failure(BrainException("No internet, or ${p.name}'s address can't be found."))
         } catch (e: java.net.SocketTimeoutException) {
-            Result.failure(BrainException("The AI took too long to answer. Try again."))
+            Result.failure(BrainException("${p.name} took too long to answer."))
         } catch (e: javax.net.ssl.SSLException) {
             Result.failure(BrainException("Secure connection failed. Check the phone's date and time, or try another network."))
         } catch (e: java.net.MalformedURLException) {
-            Result.failure(BrainException("The ADDRESS in Settings isn't valid. It should start with https://"))
+            Result.failure(BrainException("The ADDRESS for ${p.name} isn't valid. It should start with https://"))
         } catch (e: IOException) {
             Result.failure(BrainException("Network problem (${e.javaClass.simpleName}: ${e.message?.take(60)})."))
         } catch (e: Exception) {
@@ -52,22 +63,22 @@ class Brain(private val settings: Settings) {
     }
 
     /** Asks the provider which models this key can use. Returns plain model ids, sorted. */
-    suspend fun fetchModels(): Result<List<String>> = withContext(Dispatchers.IO) {
+    suspend fun fetchModels(p: Provider): Result<List<String>> = withContext(Dispatchers.IO) {
         try {
-            val base = settings.aiBaseUrl.trim().trimEnd('/')
+            val base = p.baseUrl.trim().trimEnd('/')
             if (base.isBlank()) throw BrainException("Fill in ADDRESS first.")
-            if (settings.aiKey.isBlank()) throw BrainException("Fill in API KEY first.")
-            val anthropic = settings.aiProvider == "anthropic" || base.contains("anthropic.com")
+            if (p.key.isBlank()) throw BrainException("Fill in API KEY first.")
+            val anthropic = p.id == "anthropic" || base.contains("anthropic.com")
             val conn = URL("$base/models" + if (anthropic) "?limit=100" else "").openConnection() as HttpURLConnection
             val reply = try {
                 conn.requestMethod = "GET"
                 conn.connectTimeout = 15_000
                 conn.readTimeout = 25_000
                 if (anthropic) {
-                    conn.setRequestProperty("x-api-key", settings.aiKey.trim())
+                    conn.setRequestProperty("x-api-key", p.key.trim())
                     conn.setRequestProperty("anthropic-version", "2023-06-01")
                 } else {
-                    conn.setRequestProperty("Authorization", "Bearer " + settings.aiKey.trim())
+                    conn.setRequestProperty("Authorization", "Bearer " + p.key.trim())
                 }
                 val code = conn.responseCode
                 val stream = if (code in 200..299) conn.inputStream else conn.errorStream
@@ -100,9 +111,9 @@ class Brain(private val settings: Settings) {
         }
     }
 
-    private fun call(history: List<Turn>, userText: String): String {
-        val base = settings.aiBaseUrl.trim().trimEnd('/')
-        val anthropic = settings.aiProvider == "anthropic" || base.contains("anthropic.com")
+    private fun call(p: Provider, history: List<Turn>, userText: String): String {
+        val base = p.baseUrl.trim().trimEnd('/')
+        val anthropic = p.id == "anthropic" || base.contains("anthropic.com")
         val thinking = settings.aiThinking
         val system = systemPrompt()
 
@@ -115,18 +126,18 @@ class Brain(private val settings: Settings) {
         val room = if (thinking) 4096 else 1024
 
         val reply: Reply = if (anthropic) {
-            var r = post(base + "/messages", anthropicBody(messages, system, room, thinking), anthropic = true)
-            if (r.code == 400 && thinking) r = post(base + "/messages", anthropicBody(messages, system, room, false), anthropic = true)
+            var r = post(p, base + "/messages", anthropicBody(p, messages, system, room, thinking), anthropic = true)
+            if (r.code == 400 && thinking) r = post(p, base + "/messages", anthropicBody(p, messages, system, room, false), anthropic = true)
             r
         } else {
             val url = base + "/chat/completions"
-            var r = post(url, openAiBody(messages, room, thinking, useCompletionTokens = false, extras = true), anthropic = false)
+            var r = post(p, url, openAiBody(p, messages, room, thinking, useCompletionTokens = false, extras = true), anthropic = false)
             // Some models reject certain fields. Retry with gentler requests before giving up.
             if (r.code == 400 || r.code == 422) {
-                r = post(url, openAiBody(messages, room, thinking, useCompletionTokens = true, extras = true), anthropic = false)
+                r = post(p, url, openAiBody(p, messages, room, thinking, useCompletionTokens = true, extras = true), anthropic = false)
             }
             if (r.code == 400 || r.code == 422) {
-                r = post(url, openAiBody(messages, room, thinking, useCompletionTokens = true, extras = false), anthropic = false)
+                r = post(p, url, openAiBody(p, messages, room, thinking, useCompletionTokens = true, extras = false), anthropic = false)
             }
             r
         }
@@ -134,9 +145,9 @@ class Brain(private val settings: Settings) {
         return parse(reply.body, anthropic)
     }
 
-    private fun anthropicBody(messages: JSONArray, system: String, room: Int, thinking: Boolean): JSONObject {
+    private fun anthropicBody(p: Provider, messages: JSONArray, system: String, room: Int, thinking: Boolean): JSONObject {
         val body = JSONObject()
-            .put("model", settings.aiModel.trim())
+            .put("model", p.model.trim())
             .put("max_tokens", room)
             .put("system", system)
             .put("messages", messages)
@@ -145,23 +156,24 @@ class Brain(private val settings: Settings) {
     }
 
     private fun openAiBody(
+        p: Provider,
         messages: JSONArray,
         room: Int,
         thinking: Boolean,
         useCompletionTokens: Boolean,
         extras: Boolean
     ): JSONObject {
-        val body = JSONObject().put("model", settings.aiModel.trim()).put("messages", messages)
+        val body = JSONObject().put("model", p.model.trim()).put("messages", messages)
         if (useCompletionTokens) body.put("max_completion_tokens", room) else body.put("max_tokens", room)
         if (!useCompletionTokens) body.put("temperature", 0.7)
-        if (extras) addThinkingParams(body, thinking)
+        if (extras) addThinkingParams(p, body, thinking)
         return body
     }
 
     /** Turns thinking on or off. Each provider spells this differently, so cover the common ones by host and by model name. */
-    private fun addThinkingParams(body: JSONObject, thinking: Boolean) {
-        val host = settings.aiBaseUrl.lowercase()
-        val model = settings.aiModel.lowercase()
+    private fun addThinkingParams(p: Provider, body: JSONObject, thinking: Boolean) {
+        val host = p.baseUrl.lowercase()
+        val model = p.model.lowercase()
         when {
             host.contains("generativelanguage.googleapis.com") ->
                 body.put(
@@ -211,25 +223,25 @@ class Brain(private val settings: Settings) {
     }
 
     /** Models that reason no matter what is sent. Used to warn the user. */
-    fun alwaysThinks(): Boolean {
-        val m = settings.aiModel.lowercase()
+    fun alwaysThinks(p: Provider): Boolean {
+        val m = p.model.lowercase()
         return m.contains("reasoner") || m.contains("-r1") || m.startsWith("o1") || m.startsWith("o3") || m.startsWith("o4") ||
             m.contains("thinking") || m.contains("2.5-pro") || m.contains("gemini-3") || m.contains("qwq") || m.contains("gpt-oss")
     }
 
-    private fun post(url: String, body: JSONObject, anthropic: Boolean): Reply {
+    private fun post(p: Provider, url: String, body: JSONObject, anthropic: Boolean): Reply {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
             conn.requestMethod = "POST"
             conn.connectTimeout = 15_000
-            conn.readTimeout = 60_000
+            conn.readTimeout = 30_000
             conn.doOutput = true
             conn.setRequestProperty("Content-Type", "application/json")
             if (anthropic) {
-                conn.setRequestProperty("x-api-key", settings.aiKey.trim())
+                conn.setRequestProperty("x-api-key", p.key.trim())
                 conn.setRequestProperty("anthropic-version", "2023-06-01")
             } else {
-                conn.setRequestProperty("Authorization", "Bearer " + settings.aiKey.trim())
+                conn.setRequestProperty("Authorization", "Bearer " + p.key.trim())
             }
             conn.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
 

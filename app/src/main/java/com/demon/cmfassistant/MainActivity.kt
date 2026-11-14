@@ -61,6 +61,23 @@ class MainActivity : ComponentActivity() {
         if (shouldAutoStart(intent)) autoStart = true
     }
 
+    override fun onResume() {
+        super.onResume()
+        resumed = true
+    }
+
+    override fun onPause() {
+        resumed = false
+        super.onPause()
+    }
+
+    companion object {
+        /** True while the full app is on screen. The small panel uses this to avoid opening on top of it. */
+        @Volatile
+        var resumed = false
+            private set
+    }
+
     override fun onStart() {
         super.onStart()
         // The bubble is a foreground service; bring it back if the user wants it and the app was restarted.
@@ -174,9 +191,9 @@ class MainActivity : ComponentActivity() {
             AiScreen(
                 settings = settings,
                 palette = palette,
-                onTestAi = controller::testAi,
+                onTestProvider = controller::testProvider,
                 onFetchModels = controller::fetchModels,
-                alwaysThinks = controller.modelAlwaysThinks(),
+                alwaysThinks = controller::modelAlwaysThinks,
                 onOpenPersona = { showPersona = true },
                 onClose = { showAi = false }
             )

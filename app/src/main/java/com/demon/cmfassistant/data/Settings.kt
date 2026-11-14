@@ -3,14 +3,31 @@ package com.demon.cmfassistant.data
 import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import org.json.JSONArray
+import org.json.JSONObject
 
 /** Theme choices: follow the system, force AMOLED dark, or force light. */
 object ThemeMode {
     const val SYSTEM = 0
     const val DARK = 1
     const val LIGHT = 2
+}
+
+/** One AI provider the assistant can use. The list order is the order they are tried in. */
+data class Provider(
+    val id: String,
+    val name: String,
+    val baseUrl: String,
+    val model: String,
+    val key: String,
+    val locked: Boolean = false,
+    val custom: Boolean = false
+) {
+    /** Has everything needed to make a request. Providers that aren't ready are skipped. */
+    val ready: Boolean get() = key.isNotBlank() && model.isNotBlank() && baseUrl.isNotBlank()
 }
 
 /** Ready-made settings for popular AI providers. All but Anthropic speak the OpenAI chat format. */
@@ -95,14 +112,8 @@ class Settings(context: Context) {
         private set
 
     // Optional AI chat (bring your own key)
-    var aiProvider by mutableStateOf(sp.getString("ai_provider", "gemini") ?: "gemini")
-        private set
-    var aiBaseUrl by mutableStateOf(sp.getString("ai_base", AiPresets.byId("gemini").baseUrl) ?: "")
-        private set
-    var aiModel by mutableStateOf(sp.getString("ai_model", AiPresets.byId("gemini").model) ?: "")
-        private set
-    var aiKey by mutableStateOf(sp.getString("ai_key_" + (sp.getString("ai_provider", "gemini") ?: "gemini"), "") ?: "")
-        private set
+    /** Providers in priority order. Edited from the AI chat page. */
+    val providers = mutableStateListOf<Provider>().also { it.addAll(loadProviders()) }
 
     var aiPersona by mutableStateOf(sp.getString("ai_persona", PersonaPresets.DEFAULT) ?: PersonaPresets.DEFAULT)
         private set
@@ -168,30 +179,87 @@ class Settings(context: Context) {
     @JvmName("applyFollowUp")
     fun setFollowUp(v: Boolean) { followUp = v; sp.edit().putBoolean("follow_up", v).apply() }
 
-    /** Picking a preset fills in its address and model. Each provider keeps its own key. */
-    @JvmName("applyAiProvider")
-    fun setAiProvider(id: String) {
-        val preset = AiPresets.byId(id)
-        aiProvider = id
-        if (id != "custom") {
-            aiBaseUrl = preset.baseUrl
-            aiModel = preset.model
+    private fun loadProviders(): List<Provider> {
+        val raw = sp.getString("ai_providers_v2", null)
+        if (raw != null) {
+            val out = ArrayList<Provider>()
+            runCatching {
+                val arr = JSONArray(raw)
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    out.add(
+                        Provider(
+                            o.getString("id"), o.optString("name"), o.optString("base"), o.optString("model"),
+                            o.optString("key"), o.optBoolean("locked"), o.optBoolean("custom")
+                        )
+                    )
+                }
+            }
+            if (out.isNotEmpty()) return out
         }
-        aiKey = sp.getString("ai_key_$id", "") ?: ""
-        sp.edit()
-            .putString("ai_provider", id)
-            .putString("ai_base", aiBaseUrl)
-            .putString("ai_model", aiModel)
-            .apply()
+        // First run of this version: bring over whatever was set up before.
+        val oldSel = sp.getString("ai_provider", "gemini") ?: "gemini"
+        val list = AiPresets.all.filter { it.id != "custom" }.map { pr ->
+            val sel = pr.id == oldSel
+            Provider(
+                pr.id, pr.name,
+                if (sel) sp.getString("ai_base", pr.baseUrl) ?: pr.baseUrl else pr.baseUrl,
+                if (sel) sp.getString("ai_model", pr.model) ?: pr.model else pr.model,
+                sp.getString("ai_key_${pr.id}", "") ?: ""
+            )
+        }.toMutableList()
+        if (oldSel == "custom" || !sp.getString("ai_key_custom", "").isNullOrBlank()) {
+            list.add(
+                Provider(
+                    "custom_old", "CUSTOM", sp.getString("ai_base", "") ?: "", sp.getString("ai_model", "") ?: "",
+                    sp.getString("ai_key_custom", "") ?: "", custom = true
+                )
+            )
+        }
+        val first = list.indexOfFirst { it.id == oldSel || (oldSel == "custom" && it.id == "custom_old") }
+        if (first > 0) list.add(0, list.removeAt(first))
+        return list
     }
 
-    @JvmName("applyAiBaseUrl")
+    private fun persistProviders() {
+        val arr = JSONArray()
+        providers.forEach {
+            arr.put(
+                JSONObject().put("id", it.id).put("name", it.name).put("base", it.baseUrl).put("model", it.model)
+                    .put("key", it.key).put("locked", it.locked).put("custom", it.custom)
+            )
+        }
+        sp.edit().putString("ai_providers_v2", arr.toString()).apply()
+    }
 
-    fun setAiBaseUrl(v: String) { aiBaseUrl = v; sp.edit().putString("ai_base", v).apply() }
-    @JvmName("applyAiModel")
-    fun setAiModel(v: String) { aiModel = v; sp.edit().putString("ai_model", v).apply() }
-    @JvmName("applyAiKey")
-    fun setAiKey(v: String) { aiKey = v; sp.edit().putString("ai_key_$aiProvider", v).apply() }
+    fun updateProvider(id: String, change: (Provider) -> Provider) {
+        val i = providers.indexOfFirst { it.id == id }
+        if (i < 0) return
+        providers[i] = change(providers[i])
+        persistProviders()
+    }
+
+    /** Moves a provider earlier (-1) or later (+1) in the order they are tried. */
+    fun moveProvider(id: String, delta: Int) {
+        val i = providers.indexOfFirst { it.id == id }
+        val j = i + delta
+        if (i < 0 || j < 0 || j >= providers.size) return
+        val p = providers.removeAt(i)
+        providers.add(j, p)
+        persistProviders()
+    }
+
+    fun addCustomProvider(name: String): String {
+        val id = "custom_" + System.currentTimeMillis()
+        providers.add(Provider(id, name.trim().uppercase().ifBlank { "CUSTOM" }, "", "", "", custom = true))
+        persistProviders()
+        return id
+    }
+
+    fun removeProvider(id: String) {
+        providers.removeAll { it.id == id && it.custom }
+        persistProviders()
+    }
 
     // Bubble position is not UI state, so it is read and written directly.
     var bubbleX: Int

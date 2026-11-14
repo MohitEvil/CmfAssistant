@@ -57,6 +57,7 @@ class PanelActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (routeToMain()) return
         current = this
         enableEdgeToEdge()
         setContent { Root() }
@@ -65,7 +66,21 @@ class PanelActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (routeToMain()) return
         autoStart = true
+    }
+
+    /** If the full app is already on screen, listen there instead of stacking the panel on top of it. */
+    private fun routeToMain(): Boolean {
+        if (!MainActivity.resumed) return false
+        handOff = true
+        startActivity(
+            Intent(this, MainActivity::class.java)
+                .setAction(Intent.ACTION_ASSIST)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        )
+        finish()
+        return true
     }
 
     override fun onDestroy() {

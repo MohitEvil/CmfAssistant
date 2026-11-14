@@ -204,9 +204,16 @@ class AssistantController(private val context: Context, val settings: Settings) 
     }
 
     /** Used by the Test buttons in Settings: asks the AI one thing and returns its answer or the error. */
-    suspend fun fetchModels(): Result<List<String>> = brain.fetchModels()
+    suspend fun fetchModels(p: com.demon.cmfassistant.data.Provider): Result<List<String>> = brain.fetchModels(p)
 
-    fun modelAlwaysThinks(): Boolean = brain.alwaysThinks()
+    fun modelAlwaysThinks(p: com.demon.cmfassistant.data.Provider): Boolean = brain.alwaysThinks(p)
+
+    /** Tests one provider on its own (no fallback), so the result says exactly which one works. */
+    suspend fun testProvider(p: com.demon.cmfassistant.data.Provider): String {
+        if (!p.ready) return "Fill in the API key, address and model first."
+        val r = brain.askOne(p, emptyList(), "Say hello in five words.")
+        return r.getOrNull() ?: (r.exceptionOrNull()?.message ?: "No answer.")
+    }
 
     suspend fun testAi(prompt: String): String {
         if (!settings.aiEnabled) return "AI chat is switched off."
@@ -238,6 +245,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         }
         haptics.lightTap()
         micActive = true
+        com.demon.cmfassistant.audio.Cue.listening()
         speech.start(settings.language, settings.preferOffline)
     }
 
@@ -294,6 +302,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
     /** "No", "that's all", "stop listening", "close": stop the mic and close the panel. */
     private fun closeConversation() {
         stopEverything()
+        com.demon.cmfassistant.audio.Cue.closing()
         haptics.veryLightTap()
         transition(AssistantState.IDLE, "", "")
     }

@@ -167,7 +167,9 @@ fun SettingsScreen(
                 Column(Modifier.weight(1f)) {
                     Text("AI chat", color = palette.fg, fontSize = 15.sp)
                     Text(
-                        if (settings.aiKey.isBlank()) "Optional. Add a key, model and address" else "On · ${settings.aiModel}",
+                        if (!settings.aiEnabled) "Off"
+                        else settings.providers.firstOrNull { it.ready }?.let { "On · ${it.name.lowercase()} · ${it.model}" }
+                            ?: "Optional. Add a provider key and model",
                         color = palette.muted, fontSize = 12.sp
                     )
                 }
@@ -320,6 +322,7 @@ internal fun Field(
     palette: GlyphPalette,
     secret: Boolean = false,
     keyboard: KeyboardType = KeyboardType.Text,
+    readOnly: Boolean = false,
     onChange: (String) -> Unit
 ) {
     Text(label, color = palette.muted, fontFamily = FontFamily.Monospace, fontSize = 10.sp, letterSpacing = 2.sp)
@@ -327,6 +330,7 @@ internal fun Field(
     BasicTextField(
         value = value,
         onValueChange = onChange,
+        readOnly = readOnly,
         singleLine = true,
         textStyle = TextStyle(color = palette.fg, fontSize = 14.sp, fontFamily = FontFamily.Monospace),
         cursorBrush = SolidColor(palette.red),

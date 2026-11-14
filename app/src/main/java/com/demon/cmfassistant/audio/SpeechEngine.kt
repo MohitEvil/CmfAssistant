@@ -38,6 +38,7 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
             return
         }
         val gen = ++generation
+        Cue.hushSystemBeep(context)
         val r = recognizer ?: SpeechRecognizer.createSpeechRecognizer(context).also { recognizer = it }
         runCatching { r.cancel() }
         r.setRecognitionListener(object : RecognitionListener {
