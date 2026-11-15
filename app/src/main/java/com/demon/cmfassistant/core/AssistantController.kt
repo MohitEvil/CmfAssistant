@@ -584,9 +584,18 @@ class AssistantController(private val context: Context, val settings: Settings) 
         transition(AssistantState.SUCCESS, message, transcript)
         haptics.success()
         val fired = java.util.concurrent.atomic.AtomicBoolean(false)
-        val go = { if (fired.compareAndSet(false, true)) launch() }
         val keepOpen = settings.stayOpen && hasMicPermission()
         val token = flow
+        val go = {
+            if (fired.compareAndSet(false, true)) {
+                launch()
+                // Bring the panel back while the app is still opening, so it is already there when the voice finishes.
+                if (keepOpen) scope.launch {
+                    delay(450)
+                    if (token == flow && !MainActivity.resumed && PanelActivity.current == null) PanelActivity.show(context)
+                }
+            }
+        }
         if (settings.speakReplies && voice.available) {
             voice.speak(message, { go() }, { if (keepOpen && token == flow) continueSession() })
             scope.launch {
@@ -608,8 +617,10 @@ class AssistantController(private val context: Context, val settings: Settings) 
         speakJob = scope.launch {
             if (!MainActivity.resumed && PanelActivity.current == null) {
                 PanelActivity.show(context)
-                delay(550)
-            } else delay(120)
+                var waited = 0
+                while (PanelActivity.current == null && waited < 1000) { delay(30); waited += 30 }
+                delay(40)
+            }
             if (t == flow) beginListening(Mode.FOLLOWUP)
         }
     }

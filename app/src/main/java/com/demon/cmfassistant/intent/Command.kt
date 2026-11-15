@@ -13,6 +13,7 @@ enum class TapKind { TAP, LONG, DOUBLE }
 enum class SwipeDir { LEFT, RIGHT, UP, DOWN }
 enum class ClipOp { SELECT_ALL, COPY, PASTE, CUT }
 enum class ValueKind { SMALLEST_WIDTH, ANIMATION }
+enum class ScreenAct { TAP, LONG, DOUBLE, ASK, DELETE }
 
 /** Everything the assistant knows how to do. */
 sealed class Command {
@@ -251,6 +252,50 @@ sealed class Command {
     /** "Find the search bar", "can you see a login button": looks on the current screen. */
     data class UiFind(val label: String) : Command(), Screen {
         override fun describe() = "Looking…"
+    }
+
+    /** Everything that works on what is on screen right now by looking at it (needs the Accessibility service). */
+    sealed class UiX : Command(), Screen
+
+    /**
+     * "Tap Demon", "long press the second toggle", "click the stop button in front of Telegram", "what is right after that".
+     * [target] may be empty or a kind word ("button", "toggle"); [nth] is 1-based (-1 = last); [region] is top/bottom/left/right/topleft/…/middle;
+     * [rel] (front, before, after, below, above, left, right, near) is measured from [anchor] ("it" = the last thing talked about).
+     */
+    data class UiSmart(
+        val target: String,
+        val act: ScreenAct = ScreenAct.TAP,
+        val nth: Int? = null,
+        val region: String? = null,
+        val rel: String? = null,
+        val anchor: String? = null
+    ) : UiX() {
+        override fun describe() = when (act) {
+            ScreenAct.ASK -> "Looking…"
+            ScreenAct.LONG -> "Pressing and holding…"
+            ScreenAct.DOUBLE -> "Double tapping…"
+            ScreenAct.DELETE -> "Deleting…"
+            ScreenAct.TAP -> "Tapping…"
+        }
+    }
+
+    /** "Scroll left", "long scroll down", "keep scrolling up", "scroll down 5 times". */
+    data class UiScrollEx(val dir: String, val times: Int = 1, val keep: Boolean = false) : UiX() {
+        override fun describe() = "Scrolling…"
+    }
+
+    /** Switch a toggle on or off on the current screen ([on] null = flip it). [label] may be empty, "it" or a name. */
+    data class UiSwitch(val label: String, val on: Boolean?) : UiX() {
+        override fun describe() = "Switching…"
+    }
+
+    /** hidekeyboard, refresh, next, prev */
+    data class UiMisc(val op: String) : UiX() {
+        override fun describe() = "On it…"
+    }
+
+    data object UiRepeat : UiX() {
+        override fun describe() = "Again…"
     }
 
     /** "Find bluetooth", "find developer options": locates a setting or app and opens it. */

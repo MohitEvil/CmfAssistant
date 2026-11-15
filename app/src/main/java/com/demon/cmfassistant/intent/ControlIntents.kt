@@ -33,6 +33,7 @@ object ControlIntents {
     }
 
     fun parse(s: String, l: String): Command? {
+        UiPhrases.parse(s, l)?.let { return it }
         // Display size / smallest width
         if (has(l, "(smallest|minimum|min) width|\\bdpi\\b|screen density|display size|\\bdensity\\b")) {
             Regex("(\\d{3,4})").find(Canon.digits(l))?.let { return Command.SetValue(ValueKind.SMALLEST_WIDTH, it.value) }
@@ -121,6 +122,7 @@ object ControlIntents {
 
     /** Looser phrases, tried just before "open <app>" so they never steal a clearer command. */
     fun late(s: String, l: String): Command? {
+        UiPhrases.late(s, l)?.let { return it }
         Regex("^(?:remind me|reminder)\\s+(?:to |about )?(.+?)\\s+(?:at\\s+(\\d{1,2})(?::(\\d{2}))?\\s*(am|pm)?|in\\s+(\\d+)\\s*(seconds?|minutes?|mins?|hours?))$", R).find(s.lowercase())?.let { m ->
             val text = m.groupValues[1].trim()
             if (m.groupValues[5].isNotEmpty()) {

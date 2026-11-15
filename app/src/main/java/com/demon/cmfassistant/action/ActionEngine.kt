@@ -66,6 +66,8 @@ class ActionEngine(context: Context) {
 
     val system = SystemActions(app)
     private val ui = UiControl(app)
+    private val smart = SmartUi(ui, app)
+    private var lastScreen: Command? = null
 
     private var torchOn = false
 
@@ -92,11 +94,21 @@ class ActionEngine(context: Context) {
     }
 
     /** Commands that wait on other apps' screens run here, off the main thread. Everything else is instant. */
-    suspend fun runSuspend(cmd: Command): ActionResult = when (cmd) {
+    suspend fun runSuspend(cmd: Command): ActionResult {
+        val r = runSuspendInner(cmd)
+        if (r is ActionResult.Success && cmd is Command.Screen && cmd !is Command.UiRepeat && cmd !is Command.GlobalAction &&
+            cmd !is Command.UiFind && cmd !== Command.ReadScreen && cmd !is Command.Chain
+        ) lastScreen = cmd
+        return r
+    }
+
+    private suspend fun runSuspendInner(cmd: Command): ActionResult = when (cmd) {
+        Command.UiRepeat -> lastScreen?.let { runSuspendInner(it) } ?: ActionResult.Failure("I don't have anything to repeat yet.")
+        is Command.UiX -> smart.run(cmd)
         is Command.Toggle -> ui.toggle(cmd.key, cmd.on)
         is Command.SetValue -> ui.setValue(cmd.kind, cmd.value)
         is Command.GlobalAction -> ui.global(cmd.key)
-        is Command.UiTap -> ui.tap(cmd.label, cmd.kind)
+        is Command.UiTap -> smart.tap(cmd.label, cmd.kind)
         is Command.UiSwipe -> ui.swipe(cmd.dir)
         is Command.UiZoom -> ui.zoom(cmd.zoomIn)
         is Command.UiClip -> ui.clip(cmd.op)
@@ -109,7 +121,7 @@ class ActionEngine(context: Context) {
         is Command.Chain -> runChain(cmd)
         is Command.UiType -> ui.type(cmd.text)
         is Command.UiScroll -> ui.scroll(cmd.forward)
-        is Command.UiFind -> ui.find(cmd.label)
+        is Command.UiFind -> smart.find(cmd.label)
         Command.ReadScreen -> ui.readScreen()
         Command.LockScreen -> ui.lockScreen() ?: system.lock()
         is Command.AppAction ->
@@ -126,7 +138,11 @@ class ActionEngine(context: Context) {
         for ((i, step) in c.steps.withIndex()) {
             onProgress?.invoke(step.describe())
             var r = runSuspend(step)
-            if (r is ActionResult.Confirm) r = runSuspend(r.command) // inside a chain, take the closest match
+            if (r is ActionResult.Confirm) {
+                // Screen taps are never guessed inside a chain: stop and ask, so the wrong chat or button is never pressed.
+                if (r.command is Command.UiX) return ActionResult.Failure("I got through $i of ${c.steps.size} steps. ${r.spoken} Say it again with the exact name, or tell me what to tap.")
+                r = runSuspend(r.command) // otherwise take the closest match
+            }
             when (r) {
                 is ActionResult.Success -> {
                     last = r.message
@@ -217,7 +233,7 @@ class ActionEngine(context: Context) {
         is Command.Toggle, is Command.SetValue, is Command.GlobalAction, is Command.UiTap,
         is Command.UiType, is Command.UiScroll, Command.ReadScreen, is Command.UiFind, is Command.UiSwipe, is Command.UiZoom,
         is Command.UiClip, is Command.UiScrollEdge, Command.UiEnter, is Command.UiSearch, is Command.UiSend, is Command.UiMessage,
-        is Command.TakePhoto, is Command.Chain ->
+        is Command.TakePhoto, is Command.Chain, is Command.UiX ->
             ActionResult.Failure("That needs the screen-control service.")
         is Command.Question, is Command.Unknown -> ActionResult.Failure("I don't know how to do that yet.")
     }

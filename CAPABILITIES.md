@@ -71,3 +71,14 @@ Limits: Accessibility must be enabled manually (Access screen); switch labels va
 - Stay open between tasks (Settings > Stay open between tasks, on by default): after each task the window comes back and listens for the next one. Say ok, thanks, stop it or stop listening to close. Needs "Display over other apps" so the window can return over other apps.
 - Camera: "take a picture / selfie" opens the camera and presses the shutter (selfie flips to the front camera and waits 1.5 s). With the camera already open, "take a picture" or "tap shutter" presses it.
 - AI voice: FETCH MODELS and FETCH VOICES, and a Google (Gemini TTS) provider.
+
+## Careful screen control (new)
+- Taps only on an exact name; otherwise it searches the whole list, then asks "Do you mean X?" before touching anything.
+- Several matches (toggles, same-named chats) -> it lists them and asks which; answer "the second one", "the top one", "the last".
+- Ordinals and areas: "tap the second toggle", "long press the top right button", "click the last one".
+- Relations: "click the stop button in front of Telegram", "... below Telegram", "what's right after that", "which button is above it".
+- Short-term memory (last 5 things, ~5 minutes): "can you see the Demon chat?" then "click on it", "long press it", "delete it", "what's next to it".
+- Scrolling: scroll left/right, "long scroll down", "scroll up 5 times", "keep scrolling down", "scroll until you see X".
+- Switches: "toggle on", "turn it off", "enable <label>", "switch the second one on".
+- Also: hide keyboard, refresh, next/previous page, "do it again", "type hello in the search box".
+- AI voice: Gemini/OpenAI/ElevenLabs are streamed (speech starts on the first chunk); Groq/custom download first.

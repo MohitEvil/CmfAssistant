@@ -556,4 +556,104 @@ class CmfAccess : AccessibilityService() {
         }
         return best
     }
+
+    // ---- Candidates: everything visible, with what it says and where it is ----
+
+    class Cand(
+        val node: AccessibilityNodeInfo,
+        val label: String,
+        val rect: Rect,
+        /** Area that responds to a tap: the nearest clickable parent, or the node itself. */
+        val hit: Rect,
+        val clickable: Boolean,
+        val checkable: Boolean,
+        val editable: Boolean
+    )
+
+    /** Every visible labelled or tappable thing on screen (assistant's own windows excluded), without duplicates. */
+    fun candidates(): List<Cand> {
+        val out = ArrayList<Cand>()
+        val seen = HashSet<String>()
+        for (r in roots()) {
+            walk(r) { n ->
+                if (n.isVisibleToUser) {
+                    val label = (n.text?.toString() ?: n.contentDescription?.toString() ?: n.hintText?.toString()).orEmpty().trim().replace('\n', ' ')
+                    val cls = n.className?.toString().orEmpty()
+                    val check = n.isCheckable || cls.contains("Switch") || cls.contains("CheckBox") || cls.contains("ToggleButton") || cls.contains("RadioButton")
+                    var hit: AccessibilityNodeInfo = n
+                    var clickable = n.isClickable
+                    if (!clickable) {
+                        var p = n.parent
+                        var i = 0
+                        while (p != null && i < 6) {
+                            if (p.isClickable) { hit = p; clickable = true; break }
+                            p = p.parent
+                            i++
+                        }
+                    }
+                    if ((label.isNotEmpty() || clickable || check || n.isEditable) && label.length <= 120) {
+                        val rc = Rect()
+                        n.getBoundsInScreen(rc)
+                        val hr = Rect()
+                        hit.getBoundsInScreen(hr)
+                        if (!rc.isEmpty && !hr.isEmpty && seen.add(label.lowercase() + "|" + hr.flattenToString())) {
+                            out.add(Cand(n, label, rc, hr, clickable, check, n.isEditable))
+                        }
+                    }
+                }
+                false
+            }
+        }
+        return out
+    }
+
+    /** Changes whenever the visible content moves, so scrolling can tell when it has reached an end. */
+    fun signature(): Int {
+        var h = 17
+        for (c in candidates().take(80)) h = h * 31 + c.label.hashCode() * 7 + c.hit.top / 8 + c.hit.left / 8
+        return h
+    }
+
+    fun canScroll(): Boolean = scrollables().isNotEmpty()
+
+    private fun scrollables(): List<AccessibilityNodeInfo> {
+        val list = ArrayList<Pair<Int, AccessibilityNodeInfo>>()
+        val r = Rect()
+        for (root in roots()) {
+            walk(root) { n ->
+                if (n.isScrollable && n.isVisibleToUser) {
+                    n.getBoundsInScreen(r)
+                    list.add(r.width() * r.height() to n)
+                }
+                false
+            }
+        }
+        return list.sortedByDescending { it.first }.map { it.second }
+    }
+
+    /** Scroll the page so the content [dir] (up/down/left/right) of the screen comes into view. */
+    fun scrollDir(dir: String): Boolean {
+        val act = when (dir) {
+            "down" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN
+            "up" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP
+            "left" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_LEFT
+            else -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT
+        }
+        val list = scrollables()
+        for (n in list) if (n.actionList.any { it.id == act.id } && n.performAction(act.id)) return true
+        if (dir == "down" || dir == "up") {
+            for (n in list) if (n.performAction(if (dir == "down") AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)) return true
+        }
+        // Nothing scrollable reported itself: drag the screen the other way.
+        return swipe(when (dir) { "down" -> "up"; "up" -> "down"; "left" -> "right"; else -> "left" })
+    }
+
+    /** Best guess at the title of the screen (the biggest short label in the top strip). */
+    fun topTitle(): String {
+        val dm = resources.displayMetrics
+        val skip = setOf("navigate up", "back", "more options", "search", "menu", "more", "close")
+        return candidates()
+            .filter { it.label.length in 2..40 && it.rect.centerY() < dm.heightPixels * 0.17f && it.label.lowercase() !in skip && !it.editable }
+            .maxByOrNull { it.rect.width() }?.label.orEmpty()
+    }
 }

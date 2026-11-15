@@ -70,7 +70,7 @@ class UiControl(context: Context) {
         false
     }
 
-    private fun needAccess(doing: String, fallback: Intent? = null) = ActionResult.Success(
+    internal fun needAccess(doing: String, fallback: Intent? = null) = ActionResult.Success(
         "To $doing myself I need Accessibility access. Opening it now. Turn on CMF Assistant, then ask again."
     ) {
         launch(fallback ?: Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -81,7 +81,7 @@ class UiControl(context: Context) {
     ) { launch(intent) }
 
     /** Makes sure the assistant's own window is out of the way so Back/Tap/Scroll reach the app underneath. */
-    private suspend fun clearWay(svc: CmfAccess) {
+    internal suspend fun clearWay(svc: CmfAccess) {
         if (PanelActivity.hide()) {
             delay(300)
         } else if (MainActivity.resumed) {
@@ -291,11 +291,11 @@ class UiControl(context: Context) {
 
     private val searchWords = setOf("search", "search bar", "search box", "search field", "search icon", "search text box", "search input", "address bar", "url bar", "text box", "text field", "input box", "input field", "textbox")
 
-    private fun isSearchLabel(label: String) = label.lowercase().trim() in searchWords
+    internal fun isSearchLabel(label: String) = label.lowercase().trim() in searchWords
 
     private var lastTarget = ""
 
-    private val shutterWords = setOf("shutter", "shutterbutton", "takephoto", "takeapicture", "takepicture", "takeaphoto", "capture", "capturebutton", "clickphoto", "clickpicture", "camerabutton", "photobutton")
+    internal val shutterWords = setOf("shutter", "shutterbutton", "takephoto", "takeapicture", "takepicture", "takeaphoto", "capture", "capturebutton", "clickphoto", "clickpicture", "camerabutton", "photobutton")
 
     suspend fun tap(label: String, kind: TapKind = TapKind.TAP): ActionResult = withContext(Dispatchers.Default) {
         val svc = CmfAccess.instance ?: return@withContext needAccess("tap things")
