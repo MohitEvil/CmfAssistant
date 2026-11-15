@@ -26,23 +26,31 @@ object Targeting {
         "chat" to Kind.ANY, "contact" to Kind.ANY, "entry" to Kind.ANY, "row" to Kind.ANY, "app" to Kind.ANY, "text" to Kind.ANY
     )
 
+    val kindWordSet: Set<String> get() = kindWords.keys
+
     private val filler = setOf("the", "a", "an", "on", "at", "this", "that", "my", "of", "to", "please")
 
     fun words(s: String): List<String> = s.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }
 
-    /** "the stop button" -> name "stop", kind CLICK. "toggle" -> name "", kind SWITCH. "Demon chat" -> "demon", ANY. */
+    /** Words that only say what kind of thing, never which one. */
+    val genericWords = setOf(
+        "one", "ones", "thing", "things", "item", "items", "option", "options", "element", "button", "buttons", "icon", "icons",
+        "switch", "switches", "toggle", "toggles", "checkbox", "checkboxes", "slider", "field", "textbox", "box", "input",
+        "link", "links", "result", "results", "tab", "tabs", "entry", "row"
+    )
+
+    /** "the stop button" -> name "stop", kind CLICK. "toggle" -> name "", kind SWITCH. "Demon chat" -> "demon". "settings" -> name "settings". */
     fun split(target: String): Pair<String, Kind> {
         var w = words(target).filter { it !in filler }
         var kind = Kind.ANY
-        while (w.isNotEmpty() && w.last() in kindWords) {
+        while (w.size > 1 && w.last() in kindWords) {
             val k = kindWords.getValue(w.last())
-            if (k != Kind.ANY || kind == Kind.ANY) kind = if (k != Kind.ANY) k else kind
+            if (k != Kind.ANY) kind = k
             w = w.dropLast(1)
         }
-        if (w.isEmpty() && target.isNotBlank()) {
-            // The whole phrase was a kind word ("button", "toggle").
-            val k = words(target).lastOrNull { it in kindWords }?.let { kindWords.getValue(it) } ?: Kind.ANY
-            return "" to k
+        if (w.size == 1 && w[0] in kindWords) {
+            val k = kindWords.getValue(w[0])
+            return if (w[0] in genericWords) "" to k else w[0] to kind
         }
         return w.joinToString(" ") to kind
     }

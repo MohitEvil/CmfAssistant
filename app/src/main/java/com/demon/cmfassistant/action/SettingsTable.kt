@@ -34,6 +34,7 @@ object SettingsTable {
         Entry("allapps", "All apps", A + "MANAGE_ALL_APPLICATIONS_SETTINGS", listOf("all apps", "manage apps", "installed apps")),
         Entry("defaultapps", "Default apps", A + "MANAGE_DEFAULT_APPS_SETTINGS", listOf("default apps", "default app", "default browser")),
         Entry("notifications", "Notifications", A + "NOTIFICATION_SETTINGS", listOf("notification", "notifications")),
+        Entry("notifhistory", "Notification history", A + "NOTIFICATION_HISTORY", listOf("notification history", "notification log", "past notifications", "old notifications", "notifications history", "history of notifications")),
         Entry("notifaccess", "Notification access", "android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS", listOf("notification access", "notification listener")),
         Entry("dndaccess", "Do Not Disturb access", "android.settings.NOTIFICATION_POLICY_ACCESS_SETTINGS", listOf("do not disturb access", "dnd access", "do not disturb", "dnd")),
         Entry("accessibility", "Accessibility", A + "ACCESSIBILITY_SETTINGS", listOf("accessibility")),

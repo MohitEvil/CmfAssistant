@@ -24,8 +24,28 @@ object HelperPhrases {
     fun parse(s: String, l0: String): Command? {
         val t = l0.replace("'", "").replace("’", "").replace(Regex("\\s+"), " ").trim()
         if (t.length > 120) return null
+        if (NotifyState.active()) pending(s, t)?.let { return it }
         weather(t)?.let { return it }
-        if (!has(t, "notification|notifications|message|messages|reply|respond|saying|said|texted|sent me|send me|need.*answer|answer.*need")) return null
+        followUp(t)?.let { return it }
+        if (!has(t, "notification|notifications|message|messages|reply|respond|saying|said|texted|sent me|send me|need.*answer|answer.*need|history")) return null
+
+        // history
+        if (has(t, "notification history|history of (?:my )?notifications|notifications history|past notifications|old notifications|earlier notifications|missed notifications|notification log|what did i miss")) {
+            if (has(t, "^(?:open|go to|launch|take me to|show me the)\\b.*(?:history|log)\\b") && !has(t, "\\b(?:read|tell|speak)\\b")) return null
+            val w = Regex("\\b(?:from|of|for|on)\\s+(?!my |the )([a-z][a-z ]*?)$").find(t)?.groupValues?.get(1)?.trim()
+            return Command.Notif(NotifOp.HISTORY, who = w.orEmpty().takeIf { it !in setOf("today", "yesterday") }.orEmpty())
+        }
+        // who sent notifications from an app
+        Regex("^who(?: all)?(?: is| are| was| were| has| have| sent| send| texted| messaged| messaging| texting| sending| pinged)*(?: me)?(?: the| a| any| new)*(?: notifications?| messages?| texts?)?(?: on| in| from| of| for)(?: the)? (.+?)(?: app)?$").find(t)?.let { m ->
+            who(m.groupValues[1])?.let { return Command.Notif(NotifOp.WHO, who = it) }
+        }
+        // what does the notification from X say
+        Regex("^what (?:does|do|did) (?:the )?(?:notifications?|messages?)(?: from| of| on| in)? (.+?) (?:say|says|said)$").find(t)?.let { m ->
+            who(m.groupValues[1])?.let { return Command.Notif(NotifOp.READ, who = it) }
+        }
+        Regex("^what (?:the )?notifications? says? (?:from|on|in) (.+)$").find(t)?.let { m ->
+            who(m.groupValues[1])?.let { return Command.Notif(NotifOp.READ, who = it) }
+        }
 
         // reply
         Regex("^(?:reply|respond|answer)(?: to)?(?: the)? (.+?) (?:recent |new )?notification(?: (?:with|saying|say|that|by saying|and say|text|message)\\s+(.+))?$").find(t)?.let { m ->
@@ -81,6 +101,11 @@ object HelperPhrases {
             who(m.groupValues[1])?.let { return Command.Notif(NotifOp.READ, who = it) }
         }
 
+        // "what notification from telegram", "read notifications from instagram", "show the messages on whatsapp"
+        Regex("^(?:what|which|read|show|tell me|give me|check|list)(?: me)?(?: new| recent| all| the| my| unread)*(?: notifications?| messages?| texts?)(?: did i get| do i have| are there| came| i got| i have)?(?: from| on| in| of| for)(?: the)? (.+?)(?: app)?$").find(t)?.let { m ->
+            who(m.groupValues[1])?.let { return Command.Notif(NotifOp.READ, who = it) }
+        }
+
         // who needs a reply
         if (!has(t, "^reply") && (has(t, "\\b(need|needs|should|must|have to|waiting|wants?)\\b.*\\b(reply|replies|respond|response|answer)\\b") || has(t, "\\bwho (should|do) i (reply|respond|answer)\\b") || has(t, "\\bunanswered\\b|\\bpending repl"))) {
             return Command.Notif(NotifOp.NEEDS_REPLY)
@@ -88,8 +113,36 @@ object HelperPhrases {
 
         // summary
         if (has(t, "^(?:show|read|check|list|tell me|give me|what are|whats|what is|speak)(?: me)?(?: all| my| the| any| new| recent| latest| unread| out| every)* notifications?(?: out| aloud| now| i have| i got| please)*$") ||
-            has(t, "^(?:do i have|did i (?:get|got|receive)|have i (?:got|received)|any|are there)(?: any| new| a| notifications?)* notifications?(?: now| today| yet)?$")
+            has(t, "^(?:do i have|did i (?:get|got|receive)|have i (?:got|received)|any|are there)(?: any| new| recent| unread| a| notifications?)* notifications?(?: i got| i have| i received| i missed)?(?: now| today| yet| so far)?$")
         ) return Command.Notif(NotifOp.SUMMARY)
+        return null
+    }
+
+
+    private val yes = Regex("^(?:yes|yeah|yep|yup|sure|ok|okay|please|reply|go ahead|do it|yes please|yes reply|sure reply)$")
+    private val no = Regex("^(?:no|nope|nah|skip|no thanks|dont|dont reply|not now|leave it|cancel|never mind|nevermind|stop|dont send)$")
+
+    /** While a reply is being offered or dictated. */
+    private fun pending(s: String, t: String): Command? {
+        val who = "@" + NotifyState.key
+        if (NotifyState.stage == 1) {
+            if (yes.matches(t)) return Command.Notif(NotifOp.REPLY_ASK)
+            if (no.matches(t)) return Command.Notif(NotifOp.DROP)
+            Regex("^(?:reply|say|tell (?:him|her|them)|send|write|answer)(?: to (?:him|her|them))?(?: saying| with| that)?\\s+(.+)$", RegexOption.IGNORE_CASE).find(s.trim())?.let { m ->
+                return Command.Notif(NotifOp.REPLY, who = who, text = m.groupValues[1].trim())
+            }
+            return null
+        }
+        if (no.matches(t)) return Command.Notif(NotifOp.DROP)
+        val body = s.trim().replace(Regex("^(?:reply|say|tell (?:him|her|them)|send|write)(?: to (?:him|her|them))?(?: saying| with| that)?\\s+", RegexOption.IGNORE_CASE), "").trim()
+        return if (body.isEmpty()) null else Command.Notif(NotifOp.REPLY, who = who, text = body)
+    }
+
+    /** "read them", "who sent them" right after a notification question. */
+    private fun followUp(t: String): Command? {
+        val w = NotifyState.recentWho() ?: return null
+        if (has(t, "^(?:read|show|tell me|what(?:s| do| does| did)?)(?: me)?(?: them| it| those| these| that| the (?:messages?|notifications?|texts?))(?: say| says| out| aloud)?$")) return Command.Notif(NotifOp.READ, who = w)
+        if (has(t, "^who(?: sent| send| are they| is it| was it| are these| texted| messaged)(?: them| it| those)?$")) return Command.Notif(NotifOp.WHO, who = w)
         return null
     }
 

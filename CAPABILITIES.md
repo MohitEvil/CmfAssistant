@@ -89,3 +89,12 @@ Limits: Accessibility must be enabled manually (Access screen); switch labels va
 - "Type 123 / type hello" opens the search box or input itself when none is focused. "Type X in the search box" also works.
 - "Click the third video / photo / item / last notification": ignores toolbar icons, picks real content.
 - Gemini 3.x AI voice only: <chuckle> for laughs and IPA for Indian place names and acronyms.
+
+## Search, play, install, notification follow-ups (new)
+- "Search X on Instagram / Telegram / any app": opens that app and uses its own search box. "Search X" alone uses the search box of the app in front. The web is used only for "search X on Google / the web" (or when nothing on screen can search).
+- "Play X on Namida / Glass Player / Mochi / Spotify": opens the app, searches X, plays the first match. "Play a random song on Namida": opens it and shuffles. "Play X on YouTube": searches YouTube and opens the first video. Naming an app means it is a music/video app.
+- Settings > Default music app / Default video app: used when you say "play a song" or "play a video" without an app.
+- "Install Instagram": opens the Play Store search, opens the app page and presses Install.
+- Notifications: "any new notification" -> "7 notifications: 3 from Telegram, 2 from WhatsApp". Then "what's new from Telegram", "who sent them", "what do they say". If a person messaged you it asks "Do you want to reply to Demon?"; say yes, then what to say, and it sends it.
+- "Notification history" opens Android's history page; "read my notification history" reads the assistant's own log (kept from when Notification access was granted).
+- "Keep scrolling down", "long scroll", "scroll down 5 times" now stop only at the real end.

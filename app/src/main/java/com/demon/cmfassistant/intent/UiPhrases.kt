@@ -125,10 +125,11 @@ object UiPhrases {
             return if (has(x, "^(top|bottom|end|start|beginning)\\b")) null else Command.UiSmart(x, ScreenAct.ASK)
         }
         if (has(t, "\\b(top|bottom|end|beginning)\\b")) return null
-        val raw = Regex("\\b(up|down|left|right|upwards?|downwards?)\\b").find(t)?.value ?: return null
-        val dir = raw.removeSuffix("s").removeSuffix("ward")
+        val raw = Regex("\\b(up|down|left|right|upwards?|downwards?)\\b").find(t)?.value
         val keep = has(t, "\\b(keep|continue|continuously|nonstop|non stop|constantly|endlessly|all the way|forever|till the end|until the end)\\b")
         val long = has(t, "\\b(long|far|lot|lots|alot|fast|quickly|big|full|much|more|way|bunch)\\b")
+        if (raw == null && !(keep || long)) return null
+        val dir = raw?.removeSuffix("s")?.removeSuffix("ward") ?: "down"
         val little = has(t, "\\b(little|bit|slightly|slowly|small|tiny|half)\\b")
         val n: Int? = Regex("\\b(\\d+|one|two|three|four|five|six|seven|eight|nine|ten|twice|thrice)\\s*(?:times|x)\\b").find(t)?.groupValues?.get(1)?.let { it.toIntOrNull() ?: noWords[it] }
             ?: if (has(t, "\\btwice\\b")) 2 else if (has(t, "\\bthrice\\b")) 3 else null

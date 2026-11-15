@@ -68,6 +68,10 @@ class ActionEngine(context: Context) {
     private val ui = UiControl(app)
     private val smart = SmartUi(ui, app)
     private val notify = NotifyActions(app)
+
+    /** Package names of the default music / video apps chosen in Settings (empty = none). */
+    var musicApp: () -> String = { "" }
+    var videoApp: () -> String = { "" }
     private var lastScreen: Command? = null
 
     private var torchOn = false
@@ -107,6 +111,10 @@ class ActionEngine(context: Context) {
         Command.UiRepeat -> lastScreen?.let { runSuspendInner(it) } ?: ActionResult.Failure("I don't have anything to repeat yet.")
         is Command.UiX -> smart.run(cmd)
         is Command.Weather -> Weather.now(cmd.place, cmd.tomorrow)
+        is Command.AppSearch -> appSearch(cmd)
+        is Command.SmartSearch -> smartSearch(cmd)
+        is Command.PlayIn -> playIn(cmd)
+        is Command.InstallApp -> smart.installApp(cmd.name)
         is Command.Notif -> notify.run(cmd)
         is Command.Toggle -> ui.toggle(cmd.key, cmd.on)
         is Command.SetValue -> ui.setValue(cmd.kind, cmd.value)
@@ -117,7 +125,7 @@ class ActionEngine(context: Context) {
         is Command.UiClip -> ui.clip(cmd.op)
         is Command.UiScrollEdge -> ui.scrollEdge(cmd.top)
         Command.UiEnter -> ui.enter()
-        is Command.UiSearch -> ui.search(cmd.query, cmd.pick)
+        is Command.UiSearch -> ui.search(cmd.query, cmd.pick, cmd.first)
         is Command.UiSend -> ui.send(cmd.body)
         is Command.UiMessage -> ui.message(cmd.contact, cmd.body)
         is Command.TakePhoto -> ui.takePhoto(cmd.selfie)
@@ -166,7 +174,7 @@ class ActionEngine(context: Context) {
     }
 
     /** True for commands that take a moment because they drive another screen. */
-    fun isSlow(cmd: Command): Boolean = cmd is Command.Screen || cmd is Command.Weather || cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.GlobalAction ||
+    fun isSlow(cmd: Command): Boolean = cmd is Command.Screen || cmd is Command.Weather || cmd is Command.AppSearch || cmd is Command.SmartSearch || cmd is Command.PlayIn || cmd is Command.InstallApp || cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.GlobalAction ||
         cmd is Command.UiTap || cmd is Command.UiFind || cmd is Command.UiType || cmd is Command.UiScroll || cmd === Command.ReadScreen ||
         (cmd is Command.AppAction && (cmd.op == AppOp.FORCE_STOP || cmd.op == AppOp.CLEAR_CACHE))
 
@@ -236,9 +244,70 @@ class ActionEngine(context: Context) {
         is Command.Toggle, is Command.SetValue, is Command.GlobalAction, is Command.UiTap,
         is Command.UiType, is Command.UiScroll, Command.ReadScreen, is Command.UiFind, is Command.UiSwipe, is Command.UiZoom,
         is Command.UiClip, is Command.UiScrollEdge, Command.UiEnter, is Command.UiSearch, is Command.UiSend, is Command.UiMessage,
-        is Command.TakePhoto, is Command.Chain, is Command.UiX, is Command.Weather, is Command.Notif ->
+        is Command.TakePhoto, is Command.Chain, is Command.UiX, is Command.Weather, is Command.Notif, is Command.AppSearch, is Command.SmartSearch, is Command.PlayIn, is Command.InstallApp ->
             ActionResult.Failure("That needs the screen-control service.")
         is Command.Question, is Command.Unknown -> ActionResult.Failure("I don't know how to do that yet.")
+    }
+
+
+    // ---- Search and play inside apps ----
+
+    private fun launcherPkg(): String =
+        app.packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName.orEmpty()
+
+    /** "Search X on Instagram": open it, find its search box, search. The web is only used if there is no such app. */
+    private suspend fun appSearch(c: Command.AppSearch): ActionResult {
+        val hit = findApp(c.app) ?: findApp(c.app, fuzzy = true)
+            ?: return run(Command.Search("${c.query} ${c.app}"))
+        return runChain(Command.Chain(listOf(Command.LaunchPackage(hit.pkg, hit.label), Command.UiSearch(c.query, false))))
+    }
+
+    /** "Search X": the search box of the app in front. With none, a settings page or the web. */
+    private suspend fun smartSearch(c: Command.SmartSearch): ActionResult {
+        val svc = com.demon.cmfassistant.access.CmfAccess.instance
+        if (svc != null) {
+            val pkg = svc.frontPackage()
+            if (pkg.isNotBlank() && pkg != launcherPkg() && pkg != "com.android.systemui") {
+                val r = ui.search(c.query, false)
+                if (r is ActionResult.Success) return r
+            }
+        }
+        SettingsTable.resolve(c.query)?.let { if (it.score >= 0.95) return system.openSetting(it.entry) }
+        return run(Command.Search(c.query))
+    }
+
+    /** Play in a named app (it is a music or video app because you named it), else the default from Settings, else YouTube / the music search. */
+    private suspend fun playIn(c: Command.PlayIn): ActionResult {
+        var pkg: String? = null
+        var label = ""
+        c.app?.let { n -> (findApp(n) ?: findApp(n, fuzzy = true))?.let { pkg = it.pkg; label = it.label } }
+        if (pkg == null && c.app == null) {
+            val def = (if (c.video) videoApp() else musicApp()).trim()
+            if (def.isNotEmpty() && runCatching { app.packageManager.getLaunchIntentForPackage(def) }.getOrNull() != null) {
+                pkg = def
+                label = runCatching { app.packageManager.getApplicationLabel(app.packageManager.getApplicationInfo(def, 0)).toString() }.getOrDefault(def)
+            }
+        }
+        if (pkg == null && (c.video || c.app?.contains("tube", true) == true)) findApp("youtube")?.let { pkg = it.pkg; label = it.label }
+        val p = pkg
+        if (p == null) {
+            val q = c.query
+            return when {
+                q != null && c.video -> ActionResult.Success("Searching YouTube for $q.") { launch(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/results?search_query=" + Uri.encode(q)))) }
+                q != null -> playMusic(Command.PlayMusic(q, c.app))
+                c.app != null -> ActionResult.Failure("I couldn't find an app called ${c.app}.")
+                else -> run(Command.Media(MediaKey.PLAY))
+            }
+        }
+        if (com.demon.cmfassistant.access.CmfAccess.instance == null) {
+            // No screen control: ask the music app directly.
+            val q = c.query
+            return if (q != null) playMusic(Command.PlayMusic(q, label)) else launchPackage(p, label)
+        }
+        val steps = ArrayList<Command>()
+        steps.add(Command.LaunchPackage(p, label))
+        if (c.query != null) steps.add(Command.UiSearch(c.query, pick = true, first = true)) else steps.add(Command.UiPlayRandom(c.video))
+        return runChain(Command.Chain(steps))
     }
 
     // ---- Settings pages and app actions, with "did you mean" confirmation ----

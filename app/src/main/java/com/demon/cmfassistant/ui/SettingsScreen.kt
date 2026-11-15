@@ -111,6 +111,13 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(16.dp))
         Card(palette) {
+            AppPickRow("Default music app", "Used for \"play a song\" when you don't name an app", settings.musicApp, palette) { settings.setMusicApp(it) }
+            Divider(palette)
+            AppPickRow("Default video app", "Used for \"play a video\" when you don't name an app", settings.videoApp, palette) { settings.setVideoApp(it) }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        Card(palette) {
             Row(
                 Modifier
                     .fillMaxWidth()

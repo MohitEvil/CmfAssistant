@@ -128,6 +128,12 @@ class Settings(context: Context) {
     var stayOpen by mutableStateOf(sp.getBoolean("stay_open", true))
         private set
 
+    /** Package names of the apps used for "play a song" / "play a video" when no app is named. Empty = none chosen. */
+    var musicApp by mutableStateOf(sp.getString("music_app", "") ?: "")
+        private set
+    var videoApp by mutableStateOf(sp.getString("video_app", "") ?: "")
+        private set
+
     // Optional AI chat (bring your own key)
     /** Providers in priority order. Edited from the AI chat page. */
     val providers = mutableStateListOf<Provider>().also { it.addAll(loadProviders()) }
@@ -264,6 +270,10 @@ class Settings(context: Context) {
     fun setSpeakReplies(v: Boolean) { speakReplies = v; sp.edit().putBoolean("speak_replies", v).apply() }
     @JvmName("applyStayOpen")
     fun setStayOpen(v: Boolean) { stayOpen = v; sp.edit().putBoolean("stay_open", v).apply() }
+    @JvmName("applyMusicApp")
+    fun setMusicApp(v: String) { musicApp = v; sp.edit().putString("music_app", v).apply() }
+    @JvmName("applyVideoApp")
+    fun setVideoApp(v: String) { videoApp = v; sp.edit().putString("video_app", v).apply() }
     @JvmName("applyFollowUp")
     fun setFollowUp(v: Boolean) { followUp = v; sp.edit().putBoolean("follow_up", v).apply() }
 

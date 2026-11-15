@@ -403,7 +403,7 @@ class UiControl(context: Context) {
     fun frontPackage(): String = CmfAccess.instance?.frontPackage().orEmpty()
 
     /** Finds the search box (or the search icon and opens it), types [query], submits, and optionally opens the best result. */
-    suspend fun search(query: String, pick: Boolean): ActionResult = withContext(Dispatchers.Default) {
+    suspend fun search(query: String, pick: Boolean, first: Boolean = false): ActionResult = withContext(Dispatchers.Default) {
         val svc = CmfAccess.instance ?: return@withContext needAccess("search in apps")
         clearWay(svc)
         AppLog.d("ui", "search '$query' pick=$pick in ${svc.frontPackage()}")
@@ -426,12 +426,12 @@ class UiControl(context: Context) {
         if (!pick) return@withContext ActionResult.Success("Searched for $query.")
         // Wait for results to show, then open the closest match.
         var hit: android.view.accessibility.AccessibilityNodeInfo? = null
-        val end = System.currentTimeMillis() + 2600
+        val end = System.currentTimeMillis() + (if (first) 3400 else 2600)
         while (System.currentTimeMillis() < end && hit == null) {
             delay(150)
             hit = svc.bestMatch(query)
         }
-        val node = hit ?: return@withContext ActionResult.Failure("I searched for $query but couldn't see a matching result.")
+        val node = hit ?: (if (first) svc.firstBigResult() ?: svc.firstResult() else null) ?: return@withContext ActionResult.Failure("I searched for $query but couldn't see a matching result.")
         if (svc.click(node)) {
             delay(500)
             ActionResult.Success("Opened $query.")

@@ -60,8 +60,14 @@ object IntentEngine {
         if (s.isEmpty()) return Command.Unknown(raw)
         val l = Canon.phrase(s.replace(',', ' '))
 
+        // A notification reply being dictated is never split into steps
+        if (NotifyState.active()) HelperPhrases.parse(s, l)?.let { return it }
+
         // Several steps in one sentence: "open telegram and message demon hi"
         Chain.parse(s)?.let { return it }
+
+        // Search / play / install inside apps (before the generic web search and play grammar)
+        AppPhrases.parse(s, l)?.let { return it }
 
         // Flashlight
         if (flashlightWord.containsMatchIn(l)) {

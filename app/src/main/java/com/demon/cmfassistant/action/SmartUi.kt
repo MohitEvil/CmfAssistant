@@ -43,6 +43,7 @@ class SmartUi(private val ui: UiControl, context: Context) {
                 is Command.UiScrollEx -> scrollEx(svc, c)
                 is Command.UiSwitch -> switch(svc, c)
                 is Command.UiMisc -> misc(svc, c.op)
+                is Command.UiPlayRandom -> playRandom(svc, c)
                 Command.UiRepeat -> ActionResult.Failure("I don't have anything to repeat yet.")
             }
         } catch (e: Exception) {
@@ -102,7 +103,9 @@ class SmartUi(private val ui: UiControl, context: Context) {
         }
 
         if (pronoun && mem == null) return ActionResult.Failure("I'm not sure which one you mean. Tell me what to tap.")
-        val (name, kind) = if (pronoun) mem!!.label to Targeting.Kind.ANY else Targeting.split(target)
+        var (name, kind) = if (pronoun) mem!!.label to Targeting.Kind.ANY else Targeting.split(target)
+        // "the third video": with a position, a content word only says what kind of thing, not which one.
+        if (!pronoun && (c.nth != null || c.region != null) && target.isNotBlank() && Targeting.words(target).all { it in Targeting.kindWordSet }) name = ""
         if (name.isBlank() && kind == Targeting.Kind.ANY && c.nth == null && c.region == null) return ActionResult.Failure("Which one should I ${verb(c.act)}?")
         AppLog.d("ui", "smart '$name' kind=$kind nth=${c.nth} region=${c.region} act=${c.act}")
         return when (val loc = locate(svc, name, kind, c.nth, c.region, if (pronoun) mem!!.rect else null)) {
@@ -118,7 +121,10 @@ class SmartUi(private val ui: UiControl, context: Context) {
                     declineMessage = "Okay, I won't touch it.",
                     declineAsFailure = false
                 )
-            Loc.None -> ActionResult.Failure("I can't see “${name.ifBlank { target }}” on this screen.")
+            Loc.None -> {
+                AppLog.d("ui", "not found '$name'; on screen: " + svc.candidates().map { it.label }.filter { it.isNotBlank() }.take(14).joinToString(" | "))
+                ActionResult.Failure("I can't see “${name.ifBlank { target }}” on this screen.")
+            }
         }
     }
 
@@ -340,12 +346,22 @@ class SmartUi(private val ui: UiControl, context: Context) {
     private suspend fun scrollEx(svc: CmfAccess, c: Command.UiScrollEx): ActionResult {
         val limit = if (c.keep) 40 else c.times.coerceIn(1, 30)
         var moved = 0
+        var stuck = 0
         var edge = false
         for (i in 0 until limit) {
             val before = svc.signature()
-            svc.scrollDir(c.dir)
-            delay(if (c.keep) 240 else 180)
-            if (svc.signature() == before) { edge = true; break }
+            var did = svc.scrollDirNode(c.dir)
+            if (!did) {
+                // Nothing reports itself scrollable here: drag the page and see whether it moved.
+                svc.scrollDirGesture(c.dir)
+                delay(450)
+                did = svc.signature() != before
+                if (!did) { edge = true; break }
+            } else {
+                delay(if (c.keep) 260 else 200)
+                // The action said yes: only stop if the page really did not change twice in a row.
+                if (svc.signature() == before) { if (++stuck >= 2) { edge = true; break } } else stuck = 0
+            }
             moved++
         }
         return when {
@@ -361,5 +377,61 @@ class SmartUi(private val ui: UiControl, context: Context) {
         "refresh" -> if (svc.swipe("down")) ActionResult.Success("Refreshing.") else ActionResult.Failure("I couldn't refresh here.")
         "next" -> if (svc.swipe("left")) ActionResult.Success("Next.") else ActionResult.Failure("I couldn't go to the next page.")
         else -> if (svc.swipe("right")) ActionResult.Success("Previous.") else ActionResult.Failure("I couldn't go back a page.")
+    }
+
+    /** Exact-label click from a prioritised list, waiting up to [ms] for the app to show it. */
+    private suspend fun clickFirstOf(svc: CmfAccess, names: List<String>, ms: Long): String? {
+        val end = System.currentTimeMillis() + ms
+        while (System.currentTimeMillis() < end) {
+            val all = svc.candidates()
+            for (n in names) {
+                val hit = all.firstOrNull { it.clickable && Targeting.score(n, it.label) >= 96 }
+                if (hit != null && svc.click(hit.node)) return n
+            }
+            delay(150)
+        }
+        return null
+    }
+
+    private suspend fun playRandom(svc: CmfAccess, c: Command.UiPlayRandom): ActionResult {
+        delay(600)
+        if (!c.video) {
+            // Some players open on another tab: go to the songs first, then shuffle.
+            clickFirstOf(svc, listOf("Songs", "Tracks", "All songs", "Library"), 700)?.let { delay(450) }
+            val did = clickFirstOf(svc, listOf("Shuffle all", "Shuffle play", "Shuffle songs", "Shuffle", "Play all", "Play random", "Random", "Play"), 2200)
+            if (did != null) return ActionResult.Success("Playing something for you.")
+        }
+        val end = System.currentTimeMillis() + 3200
+        var row: android.view.accessibility.AccessibilityNodeInfo? = null
+        while (System.currentTimeMillis() < end && row == null) { row = svc.firstBigResult(); if (row == null) delay(200) }
+        val r = row ?: return ActionResult.Failure("I opened the app but couldn't find something to play. Tell me what to tap.")
+        return if (svc.click(r)) ActionResult.Success(if (c.video) "Playing a video." else "Playing a song.") else ActionResult.Failure("I couldn't start anything. Tell me what to tap.")
+    }
+
+    /** Opens the Play Store on [name], opens the matching app page and presses Install. */
+    suspend fun installApp(name: String): ActionResult = withContext(Dispatchers.Default) {
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("market://search?q=${android.net.Uri.encode(name)}&c=apps"))
+            .setPackage("com.android.vending").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        val svc = CmfAccess.instance
+        if (svc == null) {
+            return@withContext ActionResult.Success("Opening the Play Store for $name. Tap Install.") { runCatching { app.startActivity(intent) } }
+        }
+        ui.clearWay(svc)
+        if (runCatching { app.startActivity(intent) }.isFailure) return@withContext ActionResult.Failure("I couldn't open the Play Store.")
+        delay(1800)
+        // The app's card in the results.
+        var hit: CmfAccess.Cand? = null
+        val end = System.currentTimeMillis() + 4500
+        while (System.currentTimeMillis() < end && hit == null) {
+            hit = svc.candidates().filter { it.clickable && !it.editable && Targeting.score(name, it.label) >= 70 }.maxByOrNull { Targeting.score(name, it.label) }
+            if (hit == null) delay(250)
+        }
+        val node = hit?.node ?: svc.firstBigResult() ?: return@withContext ActionResult.Failure("I opened the Play Store but couldn't see $name. Tell me which result to tap.")
+        svc.click(node)
+        delay(1500)
+        val done = clickFirstOf(svc, listOf("Install", "Get"), 5000)
+        if (done != null) return@withContext ActionResult.Success("Installing $name.")
+        if (svc.candidates().any { it.clickable && Targeting.score("Open", it.label) >= 96 }) return@withContext ActionResult.Success("$name is already installed.")
+        ActionResult.Failure("I opened $name on the Play Store but couldn't find the Install button. Tap it, or tell me what to tap.")
     }
 }

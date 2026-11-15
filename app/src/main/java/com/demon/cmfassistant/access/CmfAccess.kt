@@ -557,6 +557,16 @@ class CmfAccess : AccessibilityService() {
         return best
     }
 
+    /** The first real content row under the top bar (a video, a song, a result), not a chip or toolbar button. */
+    fun firstBigResult(): AccessibilityNodeInfo? {
+        val dm = resources.displayMetrics
+        val h = dm.heightPixels
+        val w = dm.widthPixels
+        val list = candidates().filter { it.clickable && !it.editable && it.hit.top > h * 0.11f && it.hit.height() >= h * 0.05f && it.hit.width() >= w * 0.45f }
+        val top = list.minByOrNull { it.hit.top } ?: return null
+        return list.filter { it.hit.top - top.hit.top < 40 }.minByOrNull { it.hit.width() * it.hit.height() }?.node
+    }
+
     // ---- Candidates: everything visible, with what it says and where it is ----
 
     class Cand(
@@ -577,7 +587,7 @@ class CmfAccess : AccessibilityService() {
         for (r in roots()) {
             walk(r) { n ->
                 if (n.isVisibleToUser) {
-                    val label = (n.text?.toString() ?: n.contentDescription?.toString() ?: n.hintText?.toString()).orEmpty().trim().replace('\n', ' ')
+                    val label = (n.text?.toString() ?: n.contentDescription?.toString() ?: n.hintText?.toString()).orEmpty().trim().replace('\n', ' ').take(200)
                     val cls = n.className?.toString().orEmpty()
                     val check = n.isCheckable || cls.contains("Switch") || cls.contains("CheckBox") || cls.contains("ToggleButton") || cls.contains("RadioButton")
                     var hit: AccessibilityNodeInfo = n
@@ -591,7 +601,7 @@ class CmfAccess : AccessibilityService() {
                             i++
                         }
                     }
-                    if ((label.isNotEmpty() || clickable || check || n.isEditable) && label.length <= 120) {
+                    if ((label.isNotEmpty() || clickable || check || n.isEditable) && true) {
                         val rc = Rect()
                         n.getBoundsInScreen(rc)
                         val hr = Rect()
@@ -630,6 +640,25 @@ class CmfAccess : AccessibilityService() {
         }
         return list.sortedByDescending { it.first }.map { it.second }
     }
+
+    /** Scrolls with the accessibility action only. False when nothing can scroll that way (the end, or no scrollable view). */
+    fun scrollDirNode(dir: String): Boolean {
+        val act = when (dir) {
+            "down" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN
+            "up" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP
+            "left" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_LEFT
+            else -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT
+        }
+        val list = scrollables()
+        for (n in list) if (n.actionList.any { it.id == act.id } && n.performAction(act.id)) return true
+        if (dir == "down" || dir == "up") {
+            for (n in list) if (n.performAction(if (dir == "down") AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)) return true
+        }
+        return false
+    }
+
+    /** Drags the screen so the content [dir] of it comes into view. */
+    fun scrollDirGesture(dir: String): Boolean = swipe(when (dir) { "down" -> "up"; "up" -> "down"; "left" -> "right"; else -> "left" })
 
     /** Scroll the page so the content [dir] (up/down/left/right) of the screen comes into view. */
     fun scrollDir(dir: String): Boolean {

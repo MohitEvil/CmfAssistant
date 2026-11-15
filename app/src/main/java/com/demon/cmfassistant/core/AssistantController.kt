@@ -50,6 +50,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val haptics = HapticController(context, settings)
     val actions = ActionEngine(context)
+        .also { it.musicApp = { settings.musicApp }; it.videoApp = { settings.videoApp } }
     /** Offline neural voice, with the device voice as a fallback. Also used by the Voice settings screen. */
     val voice = VoiceHub(context, settings)
     private val brain = Brain(settings)
@@ -302,6 +303,8 @@ class AssistantController(private val context: Context, val settings: Settings) 
     private fun process(raw: String) {
         val awaiting = awaitingMore
         awaitingMore = false
+        // Dictating a notification reply: "ok" or "thanks" may be the reply itself, never an exit.
+        if (com.demon.cmfassistant.intent.NotifyState.active()) { runCommand(raw); return }
         if (inSession && Wrapup.endsSession(raw)) {
             if (Wrapup.isThanks(raw)) {
                 val reply = Wrapup.welcome.random()

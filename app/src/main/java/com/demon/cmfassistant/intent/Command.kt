@@ -14,7 +14,7 @@ enum class SwipeDir { LEFT, RIGHT, UP, DOWN }
 enum class ClipOp { SELECT_ALL, COPY, PASTE, CUT }
 enum class ValueKind { SMALLEST_WIDTH, ANIMATION }
 enum class ScreenAct { TAP, LONG, DOUBLE, ASK, DELETE }
-enum class NotifOp { SUMMARY, READ, READ_NTH, FROM, OPEN, REPLY, NEEDS_REPLY, CLEAR, CLEAR_ALL }
+enum class NotifOp { SUMMARY, READ, READ_NTH, FROM, OPEN, REPLY, NEEDS_REPLY, CLEAR, CLEAR_ALL, HISTORY, WHO, REPLY_ASK, DROP }
 
 /** Everything the assistant knows how to do. */
 sealed class Command {
@@ -132,6 +132,25 @@ sealed class Command {
         override fun describe() = "Checking notifications…"
     }
 
+    /** "Search X on Instagram": open that app and use its own search box. Falls back to the web if there is no such app. */
+    data class AppSearch(val app: String, val query: String) : Command() {
+        override fun describe() = "Searching $query on $app…"
+    }
+
+    /** "Search X": use the search box of the app in front; only if there is none, search the web. */
+    data class SmartSearch(val query: String) : Command() {
+        override fun describe() = "Searching for $query…"
+    }
+
+    /** "Play X on Namida", "play a random song", "play a video": [app] null means the default music/video app from Settings. [query] null = anything. */
+    data class PlayIn(val app: String?, val query: String?, val video: Boolean = false) : Command() {
+        override fun describe() = "Playing…"
+    }
+
+    data class InstallApp(val name: String) : Command() {
+        override fun describe() = "Finding $name on the Play Store…"
+    }
+
     data class Weather(val place: String?, val tomorrow: Boolean = false) : Command() {
         override fun describe() = "Checking the weather…"
     }
@@ -228,7 +247,7 @@ sealed class Command {
     }
 
     /** In the current app: find the search box, type [query], submit, and optionally open the best result. */
-    data class UiSearch(val query: String, val pick: Boolean) : Command(), Screen {
+    data class UiSearch(val query: String, val pick: Boolean, val first: Boolean = false) : Command(), Screen {
         override fun describe() = "Searching for $query…"
     }
 
@@ -300,6 +319,11 @@ sealed class Command {
     }
 
     /** hidekeyboard, refresh, next, prev */
+    /** In the open music or video app: start something random (Shuffle / Play all, or the first song or video). */
+    data class UiPlayRandom(val video: Boolean) : UiX() {
+        override fun describe() = "Starting something…"
+    }
+
     data class UiMisc(val op: String) : UiX() {
         override fun describe() = "On it…"
     }

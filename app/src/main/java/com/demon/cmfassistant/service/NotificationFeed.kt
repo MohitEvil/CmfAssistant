@@ -1,9 +1,12 @@
 package com.demon.cmfassistant.service
 
+import android.content.Context
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import org.json.JSONArray
+import org.json.JSONObject
 
-/** Optional: once the user grants Notification access, the assistant can read or clear notifications. */
+/** Optional: once the user grants Notification access, the assistant can read, reply to, clear and look back at notifications. */
 class NotificationFeed : NotificationListenerService() {
 
     override fun onListenerConnected() {
@@ -14,12 +17,17 @@ class NotificationFeed : NotificationListenerService() {
         if (instance === this) instance = null
     }
 
+    override fun onNotificationPosted(sbn: StatusBarNotification?) {
+        val s = sbn ?: return
+        runCatching { build(this, s)?.let { record(this, it) } }
+    }
+
     override fun onDestroy() {
         if (instance === this) instance = null
         super.onDestroy()
     }
 
-    /** One showing notification, flattened. [index] 0 = newest. */
+    /** One showing notification, flattened. */
     class Note(
         val key: String,
         val pkg: String,
@@ -30,7 +38,9 @@ class NotificationFeed : NotificationListenerService() {
         val sbn: StatusBarNotification,
         val canReply: Boolean
     ) {
-        /** "Demon says: hi" / "Telegram: title. text" */
+        /** A real person (or group) rather than the app's own headline. */
+        val fromPerson: Boolean get() = canReply && title.isNotBlank() && !title.equals(app, true)
+
         fun spoken(): String = when {
             title.isNotBlank() && text.isNotBlank() -> "$app, $title: $text"
             title.isNotBlank() -> "$app: $title"
@@ -38,44 +48,74 @@ class NotificationFeed : NotificationListenerService() {
         }
     }
 
+    /** One line of the assistant's own notification history (kept on the phone, newest last). */
+    class Hist(val pkg: String, val app: String, val title: String, val text: String, val time: Long)
+
     companion object {
         @Volatile
         var instance: NotificationFeed? = null
 
+        private const val PREFS = "cmf_notif_history"
+        private const val CAP = 200
+        private val lock = Any()
+
         private fun pretty(s: CharSequence?): String = s?.toString()?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
 
-        /** Everything showing that is a real alert (no ongoing, no group headers, nothing of ours), newest first. Null = no access. */
+        private fun build(svc: NotificationFeed, sbn: StatusBarNotification): Note? {
+            if (sbn.packageName == svc.packageName || sbn.isOngoing) return null
+            if (sbn.notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY != 0) return null
+            val e = sbn.notification.extras
+            var title = pretty(e.getCharSequence("android.title"))
+            var text = pretty(e.getCharSequence("android.bigText")).ifBlank { pretty(e.getCharSequence("android.text")) }
+            runCatching {
+                val msgs = e.getParcelableArray("android.messages")
+                val last = msgs?.lastOrNull() as? android.os.Bundle
+                val m = pretty(last?.getCharSequence("text"))
+                if (m.isNotBlank()) text = m
+                val who = pretty(last?.getCharSequence("sender"))
+                if (who.isNotBlank() && title.isBlank()) title = who
+            }
+            if (title.isBlank() && text.isBlank()) return null
+            val pm = svc.packageManager
+            val app = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(sbn.packageName, 0)).toString() }.getOrDefault(sbn.packageName)
+            val reply = sbn.notification.actions?.any { a -> a.remoteInputs?.isNotEmpty() == true } == true
+            return Note(sbn.key, sbn.packageName, app, title, text.take(300), sbn.postTime, sbn, reply)
+        }
+
+        /** Everything showing that is a real alert, newest first. Null = no access. */
         fun notes(): List<Note>? {
             val svc = instance ?: return null
             val all: Array<StatusBarNotification> = runCatching { svc.activeNotifications }.getOrNull() ?: return emptyList()
-            val pm = svc.packageManager
-            return all.asSequence()
-                .filter { it.packageName != svc.packageName && !it.isOngoing }
-                .filter { it.notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY == 0 }
-                .sortedByDescending { it.postTime }
-                .mapNotNull { sbn ->
-                    val e = sbn.notification.extras
-                    var title = pretty(e.getCharSequence("android.title"))
-                    var text = pretty(e.getCharSequence("android.bigText")).ifBlank { pretty(e.getCharSequence("android.text")) }
-                    // Chat apps: the newest message sits in the messages list.
-                    runCatching {
-                        val msgs = e.getParcelableArray("android.messages")
-                        val last = msgs?.lastOrNull() as? android.os.Bundle
-                        val m = pretty(last?.getCharSequence("text"))
-                        if (m.isNotBlank()) text = m
-                        val who = pretty(last?.getCharSequence("sender"))
-                        if (who.isNotBlank() && title.isBlank()) title = who
-                    }
-                    if (title.isBlank() && text.isBlank()) return@mapNotNull null
-                    val app = runCatching { pm.getApplicationLabel(pm.getApplicationInfo(sbn.packageName, 0)).toString() }.getOrDefault(sbn.packageName)
-                    val reply = sbn.notification.actions?.any { a -> a.remoteInputs?.isNotEmpty() == true } == true
-                    Note(sbn.key, sbn.packageName, app, title, text.take(300), sbn.postTime, sbn, reply)
-                }
+            return all.sortedByDescending { it.postTime }
+                .mapNotNull { runCatching { build(svc, it) }.getOrNull() }
                 .distinctBy { it.pkg + "|" + it.title + "|" + it.text }
-                .toList()
         }
 
-        /** Opens the notification the way tapping it would. */
+        // ---- history ----
+
+        private fun record(ctx: Context, n: Note) {
+            synchronized(lock) {
+                val sp = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                val arr = runCatching { JSONArray(sp.getString("log", "[]")) }.getOrDefault(JSONArray())
+                val last = arr.optJSONObject(arr.length() - 1)
+                if (last != null && last.optString("pkg") == n.pkg && last.optString("title") == n.title && last.optString("text") == n.text) return
+                arr.put(JSONObject().put("pkg", n.pkg).put("app", n.app).put("title", n.title).put("text", n.text).put("t", n.time))
+                val out = JSONArray()
+                for (i in maxOf(0, arr.length() - CAP) until arr.length()) out.put(arr.get(i))
+                sp.edit().putString("log", out.toString()).apply()
+            }
+        }
+
+        /** Notifications seen since access was granted, newest first (including ones already dismissed). */
+        fun history(ctx: Context): List<Hist> = synchronized(lock) {
+            val arr = runCatching { JSONArray(ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("log", "[]")) }.getOrDefault(JSONArray())
+            (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }
+                .map { Hist(it.optString("pkg"), it.optString("app"), it.optString("title"), it.optString("text"), it.optLong("t")) }
+                .reversed()
+        }
+
+        // ---- acting ----
+
         fun open(n: Note): Boolean {
             val pi = n.sbn.notification.contentIntent
             val ok = pi != null && runCatching { pi.send(); true }.getOrDefault(false)
@@ -103,24 +143,7 @@ class NotificationFeed : NotificationListenerService() {
         }
 
         /** "App: title. text" lines for the notifications that are showing, newest first. */
-        fun readable(limit: Int = 6): List<String>? {
-            val svc = instance ?: return null
-            val list: Array<StatusBarNotification> = runCatching { svc.activeNotifications }.getOrNull() ?: return emptyList()
-            return list.filter { it.isClearable }
-                .sortedByDescending { it.postTime }
-                .take(limit)
-                .mapNotNull { sbn ->
-                    val e = sbn.notification.extras
-                    val title = e.getCharSequence("android.title")?.toString().orEmpty()
-                    val text = e.getCharSequence("android.text")?.toString().orEmpty()
-                    val app = runCatching {
-                        val pm = svc.packageManager
-                        pm.getApplicationLabel(pm.getApplicationInfo(sbn.packageName, 0)).toString()
-                    }.getOrDefault(sbn.packageName)
-                    val body = listOf(title, text).filter { it.isNotBlank() }.joinToString(". ")
-                    if (body.isBlank()) null else "$app: $body"
-                }
-        }
+        fun readable(limit: Int = 6): List<String>? = notes()?.take(limit)?.map { it.spoken() }
 
         fun clearAll(): Boolean {
             val svc = instance ?: return false
