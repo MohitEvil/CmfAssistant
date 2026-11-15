@@ -523,7 +523,26 @@ class UiControl(context: Context) {
     suspend fun type(text: String): ActionResult = withContext(Dispatchers.Default) {
         val svc = CmfAccess.instance ?: return@withContext needAccess("type for you")
         clearWay(svc)
-        if (svc.setText(text)) ActionResult.Success("Typed it.") else ActionResult.Failure("There's no text box I can type into.")
+        var v = text.trim()
+        // "one two three" -> 123
+        if (Regex("^[a-z ]+$").matches(v)) {
+            val d = com.demon.cmfassistant.intent.Canon.digits(v)
+            if (Regex("^[0-9 ]+$").matches(d)) v = d.replace(" ", "")
+        }
+        if (svc.setText(v)) return@withContext ActionResult.Success("Typed $v.")
+        // No text box is open yet: open the search box (or whatever input is on screen) first, then type.
+        svc.findSearchTrigger()?.let { (node, isField) ->
+            if (!isField) { svc.click(node); delay(350) } else { svc.click(node); delay(150) }
+            svc.waitEditable(1800)?.let { if (svc.setText(v)) return@withContext ActionResult.Success("Typed $v.") }
+        }
+        val hintWords = listOf("message", "type", "write", "enter", "reply", "comment", "note", "name", "email", "password", "username", "url", "address", "number", "phone")
+        val box = svc.candidates().firstOrNull { c -> (c.editable || c.clickable) && hintWords.any { c.label.lowercase().contains(it) } }
+        if (box != null) {
+            svc.click(box.node)
+            delay(350)
+            svc.waitEditable(1800)?.let { if (svc.setText(v)) return@withContext ActionResult.Success("Typed $v.") }
+        }
+        ActionResult.Failure("I can't find a box to type in on this screen. Tap one, or tell me which, and I'll type it.")
     }
 
     suspend fun scroll(forward: Boolean): ActionResult = withContext(Dispatchers.Default) {

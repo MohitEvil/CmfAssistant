@@ -67,6 +67,7 @@ class ActionEngine(context: Context) {
     val system = SystemActions(app)
     private val ui = UiControl(app)
     private val smart = SmartUi(ui, app)
+    private val notify = NotifyActions(app)
     private var lastScreen: Command? = null
 
     private var torchOn = false
@@ -105,6 +106,8 @@ class ActionEngine(context: Context) {
     private suspend fun runSuspendInner(cmd: Command): ActionResult = when (cmd) {
         Command.UiRepeat -> lastScreen?.let { runSuspendInner(it) } ?: ActionResult.Failure("I don't have anything to repeat yet.")
         is Command.UiX -> smart.run(cmd)
+        is Command.Weather -> Weather.now(cmd.place, cmd.tomorrow)
+        is Command.Notif -> notify.run(cmd)
         is Command.Toggle -> ui.toggle(cmd.key, cmd.on)
         is Command.SetValue -> ui.setValue(cmd.kind, cmd.value)
         is Command.GlobalAction -> ui.global(cmd.key)
@@ -163,7 +166,7 @@ class ActionEngine(context: Context) {
     }
 
     /** True for commands that take a moment because they drive another screen. */
-    fun isSlow(cmd: Command): Boolean = cmd is Command.Screen || cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.GlobalAction ||
+    fun isSlow(cmd: Command): Boolean = cmd is Command.Screen || cmd is Command.Weather || cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.GlobalAction ||
         cmd is Command.UiTap || cmd is Command.UiFind || cmd is Command.UiType || cmd is Command.UiScroll || cmd === Command.ReadScreen ||
         (cmd is Command.AppAction && (cmd.op == AppOp.FORCE_STOP || cmd.op == AppOp.CLEAR_CACHE))
 
@@ -233,7 +236,7 @@ class ActionEngine(context: Context) {
         is Command.Toggle, is Command.SetValue, is Command.GlobalAction, is Command.UiTap,
         is Command.UiType, is Command.UiScroll, Command.ReadScreen, is Command.UiFind, is Command.UiSwipe, is Command.UiZoom,
         is Command.UiClip, is Command.UiScrollEdge, Command.UiEnter, is Command.UiSearch, is Command.UiSend, is Command.UiMessage,
-        is Command.TakePhoto, is Command.Chain, is Command.UiX ->
+        is Command.TakePhoto, is Command.Chain, is Command.UiX, is Command.Weather, is Command.Notif ->
             ActionResult.Failure("That needs the screen-control service.")
         is Command.Question, is Command.Unknown -> ActionResult.Failure("I don't know how to do that yet.")
     }

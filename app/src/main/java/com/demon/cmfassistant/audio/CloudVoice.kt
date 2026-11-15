@@ -221,7 +221,7 @@ class CloudVoice(private val context: Context, private val settings: Settings) {
         val base = p.baseUrl.trimEnd('/')
         val url = "$base/models/${p.model}:streamGenerateContent?alt=sse"
         fun body(withStyle: Boolean): JSONObject {
-            val part = JSONObject().put("text", text)
+            val part = JSONObject().put("text", if (withStyle) VoiceStyle.decorate(text) else text)
             if (withStyle) part.put("speech_metadata", JSONObject().put("style", "Warm, natural, friendly and concise, like a helpful phone assistant"))
             return JSONObject()
                 .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(part))))

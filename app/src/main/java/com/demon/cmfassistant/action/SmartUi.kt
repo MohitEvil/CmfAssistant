@@ -175,10 +175,15 @@ class SmartUi(private val ui: UiControl, context: Context) {
         fun look(): Loc? {
             val all = svc.candidates()
             if (name.isBlank()) {
-                val pool = when (kind) {
+                var pool = when (kind) {
                     Targeting.Kind.SWITCH -> all.filter { it.checkable }
                     Targeting.Kind.FIELD -> all.filter { it.editable }
                     else -> all.filter { it.clickable && !it.editable }
+                }
+                if (kind == Targeting.Kind.ANY) {
+                    // "the third video / photo / item": real content, not toolbar icons, and not a wrapper around another tappable thing.
+                    val big = pool.filter { it.hit.width() >= w * 0.2f && it.hit.height() >= h * 0.06f }
+                    if (big.isNotEmpty()) pool = big.filter { a -> big.none { b -> b !== a && a.hit != b.hit && a.hit.contains(b.hit) } }
                 }
                 return if (pool.isEmpty()) null else choose(pool)
             }

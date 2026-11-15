@@ -14,6 +14,7 @@ enum class SwipeDir { LEFT, RIGHT, UP, DOWN }
 enum class ClipOp { SELECT_ALL, COPY, PASTE, CUT }
 enum class ValueKind { SMALLEST_WIDTH, ANIMATION }
 enum class ScreenAct { TAP, LONG, DOUBLE, ASK, DELETE }
+enum class NotifOp { SUMMARY, READ, READ_NTH, FROM, OPEN, REPLY, NEEDS_REPLY, CLEAR, CLEAR_ALL }
 
 /** Everything the assistant knows how to do. */
 sealed class Command {
@@ -124,6 +125,15 @@ sealed class Command {
 
     data object LockScreen : Command() {
         override fun describe() = "Locking the phone…"
+    }
+
+    /** Notifications by position or sender: read, open, reply, clear, "any from X". [nth] is 1-based from the newest, negative from the oldest. */
+    data class Notif(val op: NotifOp, val who: String = "", val nth: Int? = null, val text: String = "") : Command() {
+        override fun describe() = "Checking notifications…"
+    }
+
+    data class Weather(val place: String?, val tomorrow: Boolean = false) : Command() {
+        override fun describe() = "Checking the weather…"
     }
 
     /** clear == false reads them aloud, true dismisses them all. */

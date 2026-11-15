@@ -13,6 +13,7 @@ object SystemIntents {
     private val offW = "\\b(off|disable|stop|deactivate)\\b"
 
     fun parse(s: String, l: String): Command? {
+        HelperPhrases.parse(s, l)?.let { return it }
         // Brightness
         if (has(l, "\\bbrightness\\b|\\b(?:dim|brighten)\\b|screen (?:brighter|dimmer)")) {
             return when {

@@ -82,3 +82,10 @@ Limits: Accessibility must be enabled manually (Access screen); switch labels va
 - Switches: "toggle on", "turn it off", "enable <label>", "switch the second one on".
 - Also: hide keyboard, refresh, next/previous page, "do it again", "type hello in the search box".
 - AI voice: Gemini/OpenAI/ElevenLabs are streamed (speech starts on the first chunk); Groq/custom download first.
+
+## Notifications, weather, typing (new)
+- Needs Notification access. "Show all notifications" reads each one aloud; "read the second notification", "open the last notification", "reply to the first notification saying ok", "reply to Demon saying I'm busy" (uses the notification's own reply box), "clear notifications from Telegram", "did I get anything from YouTube", "what's Demon saying", "who needs my reply".
+- "What's the weather (in Delhi / tomorrow)": Open-Meteo, no key; without a place it uses your network's rough location.
+- "Type 123 / type hello" opens the search box or input itself when none is focused. "Type X in the search box" also works.
+- "Click the third video / photo / item / last notification": ignores toolbar icons, picks real content.
+- Gemini 3.x AI voice only: <chuckle> for laughs and IPA for Indian place names and acronyms.

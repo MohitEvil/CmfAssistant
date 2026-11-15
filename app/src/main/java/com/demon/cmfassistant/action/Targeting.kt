@@ -18,6 +18,11 @@ object Targeting {
         "field" to Kind.FIELD, "textbox" to Kind.FIELD, "box" to Kind.FIELD, "input" to Kind.FIELD,
         "option" to Kind.ANY, "options" to Kind.ANY, "item" to Kind.ANY, "items" to Kind.ANY, "one" to Kind.ANY, "ones" to Kind.ANY,
         "thing" to Kind.ANY, "things" to Kind.ANY, "element" to Kind.ANY, "link" to Kind.ANY, "tab" to Kind.ANY, "result" to Kind.ANY,
+        "video" to Kind.ANY, "videos" to Kind.ANY, "photo" to Kind.ANY, "photos" to Kind.ANY, "picture" to Kind.ANY, "pictures" to Kind.ANY,
+        "image" to Kind.ANY, "images" to Kind.ANY, "post" to Kind.ANY, "message" to Kind.ANY, "messages" to Kind.ANY, "song" to Kind.ANY, "songs" to Kind.ANY,
+        "track" to Kind.ANY, "notification" to Kind.ANY, "thumbnail" to Kind.ANY, "card" to Kind.ANY, "file" to Kind.ANY, "folder" to Kind.ANY,
+        "story" to Kind.ANY, "reel" to Kind.ANY, "short" to Kind.ANY, "channel" to Kind.ANY, "conversation" to Kind.ANY, "mail" to Kind.ANY,
+        "email" to Kind.ANY, "document" to Kind.ANY, "setting" to Kind.ANY, "settings" to Kind.ANY, "menu" to Kind.ANY, "tile" to Kind.ANY,
         "chat" to Kind.ANY, "contact" to Kind.ANY, "entry" to Kind.ANY, "row" to Kind.ANY, "app" to Kind.ANY, "text" to Kind.ANY
     )
 
@@ -58,6 +63,13 @@ object Targeting {
         val ls = l.joinToString("")
         if (qs == ls) return 98
         if (q.toSet() == l.toSet()) return 96
+        // Chat rows read like "Demon, hi there, 2:30 PM": the first part is the name.
+        val seg = label.split(Regex("[,;:|\\n]|\\s[-–—]\\s"), 2)[0]
+        if (seg.length < label.length) {
+            val sw = words(seg)
+            if (sw == q) return 97
+            if (sw.isNotEmpty() && sw.take(q.size) == q && sw.size - q.size <= 1) return 91
+        }
         val extra = l.size - q.size
         if (extra > 0) {
             if (l.take(q.size) == q) return if (extra <= 2) 92 else 80
