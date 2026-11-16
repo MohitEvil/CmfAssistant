@@ -9,7 +9,7 @@ data class VoiceModel(
     val url: String,
     /** Folder name inside the downloaded archive. */
     val folder: String,
-    /** "kitten", "kokoro", "supertonic", "matcha" or "melo": which sherpa-onnx model type this is. */
+    /** "kokoro", "supertonic", "matcha", "melo" or "piper": which sherpa-onnx model type this is. */
     val kind: String,
     val modelFile: String,
     /** Voice name to speaker id. */
@@ -32,10 +32,7 @@ fun VoiceModel.requiredFiles(): List<String> = when (kind) {
     )
     "matcha" -> listOf(modelFile, "tokens.txt", "espeak-ng-data")
     "melo" -> listOf(modelFile, "lexicon.txt", "tokens.txt", "dict")
-    "pocket" -> listOf(
-        "lm_flow.int8.onnx", "lm_main.int8.onnx", "encoder.onnx", "decoder.int8.onnx",
-        "text_conditioner.onnx", "vocab.json", "token_scores.json"
-    )
+    "piper" -> listOf(modelFile, "zani.onnx.json", "tokens.txt", "espeak-ng-data")
     else -> listOfNotNull(modelFile.ifBlank { null }, "voices.bin", "tokens.txt") // newer Kitten voices may or may not ship espeak-ng-data
 } + extras.map { it.second }
 
@@ -50,9 +47,6 @@ fun VoiceModel.findLexicon(dir: java.io.File): java.io.File? =
     dir.listFiles()?.filter { it.isFile && it.name.startsWith("lexicon") && it.name.endsWith(".txt") }?.minByOrNull { it.name }
 
 object VoiceCatalog {
-    /** Reference clip file names (assets/voice_refs) in the same order as the Zani speaker ids. */
-    val zaniRefs = listOf("zani_main.wav", "zani_soft.wav", "zani_serious.wav", "zani_amused.wav")
-
     private const val BASE = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/"
 
     private val kittenVoices = (1..8).map { "Voice $it" to (it - 1) }
@@ -91,17 +85,20 @@ object VoiceCatalog {
             hindi = true
         ),
         VoiceModel(
-            id = "pocket-zani",
+            id = "piper-zani",
             name = "ZANI (YOUR VOICE)",
-            blurb = "Your character voice. Kyutai Pocket TTS cloned from your Zani voice samples, plus three moods (soft, serious, amused). English only. Slower to start, so repeat phrases are cached.",
-            sizeLabel = "about 100 MB",
-            url = BASE + "sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2",
-            folder = "sherpa-onnx-pocket-tts-int8-2026-01-26",
-            kind = "pocket",
-            modelFile = "lm_main.int8.onnx",
-            voices = listOf("Zani" to 0, "Soft" to 1, "Serious" to 2, "Amused" to 3),
+            blurb = "Your own trained Piper voice. Fast and light, English. Downloads your two voice files from Google Drive plus a small pronunciation pack.",
+            sizeLabel = "small",
+            url = BASE + "espeak-ng-data.tar.bz2",
+            folder = "piper-zani",
+            kind = "piper",
+            modelFile = "zani.onnx",
+            voices = listOf("Zani" to 0),
             defaultSid = 0,
-            heavy = true
+            extras = listOf(
+                "https://drive.usercontent.google.com/download?id=1oQLEqTjFXIVTslK5t2Q-_Ln0RMQCD7Q9&export=download&confirm=t" to "zani.onnx",
+                "https://drive.usercontent.google.com/download?id=1KhRNWRsMxTGlBmdzZwKtooog0YIcf1pp&export=download&confirm=t" to "zani.onnx.json"
+            )
         )
     )
 
