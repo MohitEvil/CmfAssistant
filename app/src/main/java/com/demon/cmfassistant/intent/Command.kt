@@ -14,6 +14,7 @@ enum class SwipeDir { LEFT, RIGHT, UP, DOWN }
 enum class ClipOp { SELECT_ALL, COPY, PASTE, CUT }
 enum class ValueKind { SMALLEST_WIDTH, ANIMATION }
 enum class ScreenAct { TAP, LONG, DOUBLE, ASK, DELETE }
+enum class NavOp { GO, NEARBY, DISTANCE, TIME, ROUTE }
 enum class NotifOp { SUMMARY, READ, READ_NTH, FROM, OPEN, REPLY, NEEDS_REPLY, CLEAR, CLEAR_ALL, HISTORY, WHO, REPLY_ASK, DROP }
 
 /** Everything the assistant knows how to do. */
@@ -149,6 +150,43 @@ sealed class Command {
 
     data class InstallApp(val name: String) : Command() {
         override fun describe() = "Finding $name on the Play Store…"
+    }
+
+    /**
+     * Maps and navigation. GO = start navigating to [to]; NEARBY = find [to] (a kind of place) around [from] or the phone;
+     * DISTANCE / TIME / ROUTE = between [from] (blank = here) and [to]. [mode] is driving, walking, cycling or transit; [app] an app name or null.
+     */
+    data class Nav(val op: NavOp, val to: String, val from: String = "", val mode: String = "driving", val app: String? = null) : Command() {
+        override fun describe() = "Checking the map…"
+    }
+
+    /** Start a dictated message: asks what to say, then sends it. */
+    data class AskMessage(val contact: String, val app: String?) : Command() {
+        override fun describe() = "Getting ready to message $contact…"
+    }
+
+    data class News(val topic: String = "") : Command() {
+        override fun describe() = "Fetching the news…"
+    }
+
+    /** Speak [text] aloud (used by scheduled reminders and announcements). */
+    data class Say(val text: String) : Command() {
+        override fun describe() = "Saying it…"
+    }
+
+    /** Keep the screen on for [minutes]; 0 turns it off. */
+    data class KeepAwake(val minutes: Int) : Command() {
+        override fun describe() = "Keeping the screen awake…"
+    }
+
+    /** Schedule [macro] (a command to run by itself later). */
+    data class AddMacro(val macro: com.demon.cmfassistant.auto.Macro) : Command() {
+        override fun describe() = "Scheduling that…"
+    }
+
+    /** op: LIST, CLEAR_ALL, DELETE (arg = words from the task), DELETE_LAST, PAUSE, RESUME. */
+    data class MacroManage(val op: String, val arg: String = "") : Command() {
+        override fun describe() = "Checking scheduled tasks…"
     }
 
     data class Weather(val place: String?, val tomorrow: Boolean = false) : Command() {

@@ -84,6 +84,8 @@ fun AccessScreen(
             { system.has(Manifest.permission.READ_CONTACTS) }, { onRequestPermission(Manifest.permission.READ_CONTACTS) }),
         AccessItem("Calendar", "“What's on my calendar today?”",
             { system.has(Manifest.permission.READ_CALENDAR) }, { onRequestPermission(Manifest.permission.READ_CALENDAR) }),
+        AccessItem("Location", "Nearby places, distances and travel times from where you are",
+            { system.has(Manifest.permission.ACCESS_COARSE_LOCATION) }, { onRequestPermission(Manifest.permission.ACCESS_COARSE_LOCATION) }),
         AccessItem("Microphone", "Listening to you",
             { system.has(Manifest.permission.RECORD_AUDIO) }, { onRequestPermission(Manifest.permission.RECORD_AUDIO) }),
         AccessItem("Display over other apps", "The floating bubble",

@@ -64,6 +64,8 @@ class CmfAccess : AccessibilityService() {
         if (out.isEmpty()) {
             rootInActiveWindow?.let { if (includeOwn || it.packageName != packageName) out.add(it) }
         }
+        // Pull a fresh copy: a cached tree is how things that just loaded stay "invisible".
+        for (r in out) runCatching { r.refresh() }
         return out
     }
 
@@ -577,7 +579,9 @@ class CmfAccess : AccessibilityService() {
         val hit: Rect,
         val clickable: Boolean,
         val checkable: Boolean,
-        val editable: Boolean
+        val editable: Boolean,
+        /** Other names for it: tooltip, state, pane title, the view id ("send_button" -> "send button"). */
+        val alts: List<String> = emptyList()
     )
 
     /** Every visible labelled or tappable thing on screen (assistant's own windows excluded), without duplicates. */
@@ -587,7 +591,15 @@ class CmfAccess : AccessibilityService() {
         for (r in roots()) {
             walk(r) { n ->
                 if (n.isVisibleToUser) {
-                    val label = (n.text?.toString() ?: n.contentDescription?.toString() ?: n.hintText?.toString()).orEmpty().trim().replace('\n', ' ').take(200)
+                    val label0 = (n.text?.toString()?.takeIf { it.isNotBlank() } ?: n.contentDescription?.toString()?.takeIf { it.isNotBlank() } ?: n.hintText?.toString()).orEmpty().trim().replace('\n', ' ').take(200)
+                    val alts = ArrayList<String>()
+                    runCatching { n.tooltipText?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { alts.add(it) } }
+                    runCatching { n.paneTitle?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { alts.add(it) } }
+                    runCatching { n.stateDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { alts.add(it) } }
+                    // Text lives in a description AND the text field sometimes: keep both searchable.
+                    if (n.text != null && n.contentDescription != null && n.text.toString() != n.contentDescription.toString()) alts.add(n.contentDescription.toString().trim().take(120))
+                    n.viewIdResourceName?.substringAfterLast('/')?.replace('_', ' ')?.trim()?.takeIf { it.length in 2..30 }?.let { alts.add(it) }
+                    val label = label0.ifBlank { alts.firstOrNull().orEmpty() }
                     val cls = n.className?.toString().orEmpty()
                     val check = n.isCheckable || cls.contains("Switch") || cls.contains("CheckBox") || cls.contains("ToggleButton") || cls.contains("RadioButton")
                     var hit: AccessibilityNodeInfo = n
@@ -607,7 +619,7 @@ class CmfAccess : AccessibilityService() {
                         val hr = Rect()
                         hit.getBoundsInScreen(hr)
                         if (!rc.isEmpty && !hr.isEmpty && seen.add(label.lowercase() + "|" + hr.flattenToString())) {
-                            out.add(Cand(n, label, rc, hr, clickable, check, n.isEditable))
+                            out.add(Cand(n, label, rc, hr, clickable, check, n.isEditable, alts))
                         }
                     }
                 }

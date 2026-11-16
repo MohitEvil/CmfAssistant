@@ -68,6 +68,7 @@ class ActionEngine(context: Context) {
     private val ui = UiControl(app)
     private val smart = SmartUi(ui, app)
     private val notify = NotifyActions(app)
+    private val nav = NavActions(app, { n -> (findApp(n) ?: findApp(n, fuzzy = true))?.pkg }, { i -> launch(i) })
 
     /** Package names of the default music / video apps chosen in Settings (empty = none). */
     var musicApp: () -> String = { "" }
@@ -111,6 +112,13 @@ class ActionEngine(context: Context) {
         Command.UiRepeat -> lastScreen?.let { runSuspendInner(it) } ?: ActionResult.Failure("I don't have anything to repeat yet.")
         is Command.UiX -> smart.run(cmd)
         is Command.Weather -> Weather.now(cmd.place, cmd.tomorrow)
+        is Command.Nav -> nav.run(cmd)
+        is Command.News -> ActionResult.Success(WebInfo.news(cmd.topic))
+        is Command.Say -> ActionResult.Success(cmd.text)
+        is Command.KeepAwake -> keepAwake(cmd.minutes)
+        is Command.AddMacro -> addMacro(cmd.macro)
+        is Command.MacroManage -> manageMacros(cmd)
+        is Command.AskMessage -> { com.demon.cmfassistant.intent.DictState.ask(cmd.contact, cmd.app); ActionResult.Success("What should I say to ${cmd.contact}?") }
         is Command.AppSearch -> appSearch(cmd)
         is Command.SmartSearch -> smartSearch(cmd)
         is Command.PlayIn -> playIn(cmd)
@@ -174,7 +182,7 @@ class ActionEngine(context: Context) {
     }
 
     /** True for commands that take a moment because they drive another screen. */
-    fun isSlow(cmd: Command): Boolean = cmd is Command.Screen || cmd is Command.Weather || cmd is Command.AppSearch || cmd is Command.SmartSearch || cmd is Command.PlayIn || cmd is Command.InstallApp || cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.GlobalAction ||
+    fun isSlow(cmd: Command): Boolean = cmd is Command.Screen || cmd is Command.Weather || cmd is Command.News || cmd is Command.Nav || cmd is Command.AppSearch || cmd is Command.SmartSearch || cmd is Command.PlayIn || cmd is Command.InstallApp || cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.GlobalAction ||
         cmd is Command.UiTap || cmd is Command.UiFind || cmd is Command.UiType || cmd is Command.UiScroll || cmd === Command.ReadScreen ||
         (cmd is Command.AppAction && (cmd.op == AppOp.FORCE_STOP || cmd.op == AppOp.CLEAR_CACHE))
 
@@ -244,7 +252,7 @@ class ActionEngine(context: Context) {
         is Command.Toggle, is Command.SetValue, is Command.GlobalAction, is Command.UiTap,
         is Command.UiType, is Command.UiScroll, Command.ReadScreen, is Command.UiFind, is Command.UiSwipe, is Command.UiZoom,
         is Command.UiClip, is Command.UiScrollEdge, Command.UiEnter, is Command.UiSearch, is Command.UiSend, is Command.UiMessage,
-        is Command.TakePhoto, is Command.Chain, is Command.UiX, is Command.Weather, is Command.Notif, is Command.AppSearch, is Command.SmartSearch, is Command.PlayIn, is Command.InstallApp ->
+        is Command.TakePhoto, is Command.Chain, is Command.UiX, is Command.Weather, is Command.Nav, is Command.News, is Command.Say, is Command.KeepAwake, is Command.AddMacro, is Command.MacroManage, is Command.AskMessage, is Command.Notif, is Command.AppSearch, is Command.SmartSearch, is Command.PlayIn, is Command.InstallApp ->
             ActionResult.Failure("That needs the screen-control service.")
         is Command.Question, is Command.Unknown -> ActionResult.Failure("I don't know how to do that yet.")
     }
@@ -712,6 +720,56 @@ class ActionEngine(context: Context) {
         if (launch(intent)) return ActionResult.Success(pick("Here's what I found for “$query”.", "Looking up “$query”."))
         val fallback = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode(query)))
         return if (launch(fallback)) ActionResult.Success(pick("Here's what I found for “$query”.", "Looking up “$query”.")) else ActionResult.Failure("No browser found")
+    }
+
+    private fun keepAwake(minutes: Int): ActionResult {
+        if (minutes <= 0) {
+            return if (com.demon.cmfassistant.auto.AwakeService.active) {
+                com.demon.cmfassistant.auto.AwakeService.stop(app)
+                ActionResult.Success("Okay, the screen can sleep normally again.")
+            } else ActionResult.Success("The screen wasn't being kept awake.")
+        }
+        com.demon.cmfassistant.auto.AwakeService.start(app, minutes)
+        val text = when {
+            minutes % 60 == 0 -> "${minutes / 60} ${if (minutes == 60) "hour" else "hours"}"
+            minutes > 60 -> "${minutes / 60} hours ${minutes % 60} minutes"
+            else -> "$minutes minutes"
+        }
+        return ActionResult.Success("Okay, I'll keep the screen awake for $text. Say stop keeping the screen awake to end it.")
+    }
+
+    private fun addMacro(m: com.demon.cmfassistant.auto.Macro): ActionResult {
+        com.demon.cmfassistant.auto.MacroStore.add(app, m)
+        com.demon.cmfassistant.auto.MacroScheduler.schedule(app, m)
+        val what = m.text.removePrefix("say ").let { if (m.text.startsWith("say ")) "say \"$it\"" else m.text }
+        return ActionResult.Success("Done. I'll $what ${m.whenText()}.")
+    }
+
+    private fun manageMacros(c: Command.MacroManage): ActionResult {
+        val all = com.demon.cmfassistant.auto.MacroStore.all(app)
+        fun drop(m: com.demon.cmfassistant.auto.Macro) {
+            com.demon.cmfassistant.auto.MacroScheduler.cancel(app, m.id)
+            com.demon.cmfassistant.auto.MacroStore.remove(app, m.id)
+        }
+        return when (c.op) {
+            "LIST" -> if (all.isEmpty()) ActionResult.Success("You have no scheduled tasks. Try saying: open YouTube every day at 10 AM.")
+            else ActionResult.Success("You have ${all.size} scheduled ${if (all.size == 1) "task" else "tasks"}. " +
+                all.take(6).joinToString(" ") { "${it.text}, ${it.whenText()}${if (it.enabled) "." else " (paused)."}" })
+            "CLEAR_ALL" -> { all.forEach(::drop); ActionResult.Success(if (all.isEmpty()) "There was nothing scheduled." else "Cleared all ${all.size} scheduled tasks.") }
+            "DELETE_LAST" -> all.lastOrNull()?.let { drop(it); ActionResult.Success("Removed: ${it.text}, ${it.whenText()}.") } ?: ActionResult.Failure("There's nothing scheduled.")
+            "DELETE" -> {
+                val words = c.arg.lowercase().split(" ").filter { it.length > 2 }
+                val hit = all.filter { m -> words.isNotEmpty() && words.all { m.text.lowercase().contains(it) } }
+                if (hit.isEmpty()) ActionResult.Failure("I couldn't find a scheduled task about ${c.arg}.")
+                else { hit.forEach(::drop); ActionResult.Success("Removed ${hit.size} scheduled ${if (hit.size == 1) "task" else "tasks"} about ${c.arg}.") }
+            }
+            "PAUSE", "RESUME" -> {
+                val on = c.op == "RESUME"
+                all.forEach { m -> val n = m.copy(enabled = on); com.demon.cmfassistant.auto.MacroStore.update(app, n); com.demon.cmfassistant.auto.MacroScheduler.schedule(app, n) }
+                ActionResult.Success(if (all.isEmpty()) "There's nothing scheduled." else if (on) "Scheduled tasks are back on." else "Paused all scheduled tasks.")
+            }
+            else -> ActionResult.Failure("I didn't get that.")
+        }
     }
 
     private fun navigate(place: String): ActionResult {

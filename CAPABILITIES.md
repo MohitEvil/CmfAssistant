@@ -98,3 +98,22 @@ Limits: Accessibility must be enabled manually (Access screen); switch labels va
 - Notifications: "any new notification" -> "7 notifications: 3 from Telegram, 2 from WhatsApp". Then "what's new from Telegram", "who sent them", "what do they say". If a person messaged you it asks "Do you want to reply to Demon?"; say yes, then what to say, and it sends it.
 - "Notification history" opens Android's history page; "read my notification history" reads the assistant's own log (kept from when Notification access was granted).
 - "Keep scrolling down", "long scroll", "scroll down 5 times" now stop only at the real end.
+
+## Navigation & maps
+- "Navigate to X", "take me to X with Waze / Google Maps / any nav app", "walking directions to X"
+- "Find hotels / parks / schools / markets / pharmacies / petrol pumps near me" (or "near Connaught Place") – speaks the closest ones with distances and opens the map
+- "How far is X from Y", "how long to reach X (walking / by bike)", "best route to X", "shortcut to X"
+- Allow Location in the Access screen for exact results; otherwise the network's rough area is used.
+
+## Messages by dictation
+- "Send a message to Demon on Telegram" → asks "What should I say?" → sends what you say ("cancel" stops it).
+
+## Scheduled tasks (Tasker-style)
+- "Open YouTube every day at 10 AM", "news briefing every morning", "every morning except Sunday", "only on Sunday at 8 pm", "on weekdays / weekends", "tomorrow at 7 say good morning", "in 30 minutes turn off Wi-Fi", "on 25 December at 9 AM …"
+- "Remind me to drink water every day at 11" is spoken aloud at that time.
+- Manage: "what scheduled tasks do I have", "delete the news automation", "delete all automations", "pause / resume automations".
+- "Keep the screen awake for the next 6 hours" / "stop keeping the screen awake" (notification with a Stop button).
+
+## News & web answers
+- "Any new news?", "latest news about cricket", "news briefing" → ~10 different headlines.
+- With AI chat off, other questions are answered from the web (DuckDuckGo / Wikipedia).

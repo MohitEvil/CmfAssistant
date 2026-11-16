@@ -65,6 +65,8 @@ object UiPhrases {
                 return Command.UiSmart("", ScreenAct.TAP, nth = ordinal(w), region = if (ordinal(w) == null) region(w) else null)
             }
             Regex("^(?:number |option |no )?(\\d)$").find(t)?.let { return Command.UiSmart("", ScreenAct.TAP, nth = it.groupValues[1].toInt()) }
+            // Said the name of one of the options that were just listed
+            ScreenMemory.options.firstOrNull { com.demon.cmfassistant.action.Targeting.score(t, it.label) >= 88 }?.let { return Command.UiSmart(it.label, ScreenAct.TAP) }
         }
 
         // "click the stop button in front of telegram"

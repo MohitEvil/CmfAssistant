@@ -63,11 +63,16 @@ object IntentEngine {
         // A notification reply being dictated is never split into steps
         if (NotifyState.active()) HelperPhrases.parse(s, l)?.let { return it }
 
+        MacroPhrases.parse(s)?.let { return it }
+
         // Several steps in one sentence: "open telegram and message demon hi"
         Chain.parse(s)?.let { return it }
 
         // Search / play / install inside apps (before the generic web search and play grammar)
         AppPhrases.parse(s, l)?.let { return it }
+        DictState.parse(s)?.let { return it }
+        NewsPhrases.parse(s)?.let { return it }
+        NavPhrases.parse(s, l)?.let { return it }
 
         // Flashlight
         if (flashlightWord.containsMatchIn(l)) {

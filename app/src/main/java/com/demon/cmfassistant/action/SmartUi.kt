@@ -3,6 +3,7 @@ package com.demon.cmfassistant.action
 import android.content.Context
 import android.graphics.Rect
 import com.demon.cmfassistant.access.CmfAccess
+import com.demon.cmfassistant.access.Ocr
 import com.demon.cmfassistant.access.ScreenMemory
 import com.demon.cmfassistant.debug.AppLog
 import com.demon.cmfassistant.intent.Command
@@ -108,7 +109,9 @@ class SmartUi(private val ui: UiControl, context: Context) {
         if (!pronoun && (c.nth != null || c.region != null) && target.isNotBlank() && Targeting.words(target).all { it in Targeting.kindWordSet }) name = ""
         if (name.isBlank() && kind == Targeting.Kind.ANY && c.nth == null && c.region == null) return ActionResult.Failure("Which one should I ${verb(c.act)}?")
         AppLog.d("ui", "smart '$name' kind=$kind nth=${c.nth} region=${c.region} act=${c.act}")
-        return when (val loc = locate(svc, name, kind, c.nth, c.region, if (pronoun) mem!!.rect else null)) {
+        var found = locate(svc, name, kind, c.nth, c.region, if (pronoun) mem!!.rect else null)
+        if (found is Loc.None) { delay(800); found = locate(svc, name, kind, c.nth, c.region, if (pronoun) mem!!.rect else null) } // the screen may still be loading
+        return when (val loc = found) {
             is Loc.One -> act(svc, loc.c, c.act)
             is Loc.Many -> ask(svc, loc.list, c, name.ifBlank { target }, -1)
             is Loc.Weak ->
@@ -123,9 +126,47 @@ class SmartUi(private val ui: UiControl, context: Context) {
                 )
             Loc.None -> {
                 AppLog.d("ui", "not found '$name'; on screen: " + svc.candidates().map { it.label }.filter { it.isNotBlank() }.take(14).joinToString(" | "))
-                ActionResult.Failure("I can't see “${name.ifBlank { target }}” on this screen.")
+                if (name.isNotBlank()) ocrFallback(svc, name, c.act)?.let { return it }
+                notFound(svc, name.ifBlank { target })
             }
         }
+    }
+
+
+    /** The tree has nothing: read the pixels, and act where the words are. */
+    private suspend fun ocrFallback(svc: CmfAccess, name: String, act: ScreenAct): ActionResult? {
+        val lines = Ocr.read(svc) ?: return null
+        val q = CmfAccess.norm(name)
+        var best: com.demon.cmfassistant.access.OcrLine? = null
+        var bestScore = 0
+        for (l in lines) {
+            var sc = Targeting.score(name, l.text)
+            if (sc < 80 && q.length >= 3 && CmfAccess.norm(l.text).contains(q)) sc = 80
+            if (sc > bestScore) { best = l; bestScore = sc }
+        }
+        val hit = best ?: return null
+        if (bestScore < 80) return null
+        val x = hit.box.exactCenterX()
+        val y = hit.box.exactCenterY()
+        val where = Targeting.whereWords(hit.box, dm.widthPixels, dm.heightPixels)
+        return when (act) {
+            ScreenAct.ASK -> ActionResult.Success("Yes, I can see “${hit.text}” $where.")
+            ScreenAct.LONG, ScreenAct.DELETE -> if (svc.holdAt(x, y, 800)) ActionResult.Success("Held “${hit.text}”.") else null
+            ScreenAct.DOUBLE -> if (svc.doubleTapAt(x, y)) ActionResult.Success("Double tapped “${hit.text}”.") else null
+            ScreenAct.TAP -> if (svc.tapAt(x, y)) ActionResult.Success("Tapped “${hit.text}”.") else null
+        }
+    }
+
+    /** Says what it can see instead of just giving up, and lets the answer be a number or a name. */
+    private fun notFound(svc: CmfAccess, wanted: String): ActionResult {
+        val w = dm.widthPixels
+        val h = dm.heightPixels
+        val visible = Targeting.reading(svc.candidates().filter { it.label.isNotBlank() && (it.clickable || it.checkable) && !it.editable })
+            .distinctBy { it.label.lowercase() }.take(6)
+        if (visible.isEmpty()) return ActionResult.Failure("I can't see “$wanted” on this screen.")
+        ScreenMemory.offer(visible.map { ScreenMemory.Opt(it.label.take(40), it.hit, Targeting.whereWords(it.hit, w, h)) })
+        val list = visible.mapIndexed { i, c -> "${i + 1}, ${c.label.take(24)}" }.joinToString("; ")
+        return ActionResult.Failure("I can't find “$wanted”. Here's what I can tap: $list. Say the number or the name.")
     }
 
     private fun verb(a: ScreenAct) = when (a) { ScreenAct.TAP -> "tap"; ScreenAct.LONG -> "press and hold"; ScreenAct.DOUBLE -> "double tap"; ScreenAct.DELETE -> "delete"; ScreenAct.ASK -> "look at" }
@@ -193,7 +234,11 @@ class SmartUi(private val ui: UiControl, context: Context) {
                 }
                 return if (pool.isEmpty()) null else choose(pool)
             }
-            val scored = all.filter { it.label.isNotEmpty() }.map { it to Targeting.score(name, it.label) }
+            val scored = all.filter { it.label.isNotEmpty() }.map { cd ->
+                var b = Targeting.score(name, cd.label)
+                for (a in cd.alts) b = max(b, (Targeting.score(name, a) * 0.97).toInt())
+                cd to b
+            }
             val exact = scored.filter { it.second >= 96 }.map { it.first }
             if (exact.isNotEmpty()) return choose(exact)
             for ((cand, s) in scored) if (s > bestScore) { bestScore = s; bestLabel = cand.label }

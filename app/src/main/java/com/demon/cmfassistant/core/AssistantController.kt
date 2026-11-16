@@ -305,6 +305,17 @@ class AssistantController(private val context: Context, val settings: Settings) 
         awaitingMore = false
         // Dictating a notification reply: "ok" or "thanks" may be the reply itself, never an exit.
         if (com.demon.cmfassistant.intent.NotifyState.active()) { runCommand(raw); return }
+        if (com.demon.cmfassistant.intent.DictState.active()) {
+            if (com.demon.cmfassistant.intent.DictState.isCancel(raw)) {
+                com.demon.cmfassistant.intent.DictState.clear()
+                success("Okay, cancelled.", raw)
+            } else {
+                val cmd = com.demon.cmfassistant.intent.DictState.finish(raw)
+                workJob?.cancel(); flow++
+                workJob = scope.launch { execute(cmd, raw) }
+            }
+            return
+        }
         if (inSession && Wrapup.endsSession(raw)) {
             if (Wrapup.isThanks(raw)) {
                 val reply = Wrapup.welcome.random()
@@ -362,6 +373,33 @@ class AssistantController(private val context: Context, val settings: Settings) 
             if (c !is Command.Unknown && c !is Command.Question) return c
         }
         return first
+    }
+
+    /** Runs a scheduled task by itself: no panel, the result is spoken. */
+    fun runScheduled(text: String) {
+        scope.launch {
+            val cmd = IntentEngine.parse(text)
+            if (cmd is Command.Unknown || cmd is Command.Question) {
+                if (settings.speakReplies && voice.available) voice.speak("Scheduled task: $text. I couldn't work out how to do it.") {}
+                return@launch
+            }
+            val quiet = cmd is Command.Say || cmd is Command.News || cmd is Command.Weather || cmd is Command.KeepAwake
+            if (!quiet) runCatching {
+                val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+                @Suppress("DEPRECATION")
+                pm.newWakeLock(android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP, "cmf:macro").acquire(8000)
+                delay(900)
+            }
+            when (val r = actions.runSuspend(cmd)) {
+                is ActionResult.Success -> {
+                    val go = r.launch
+                    if (settings.speakReplies && voice.available && (quiet || go == null)) voice.speak(r.message) { go?.invoke() }
+                    else go?.invoke()
+                }
+                is ActionResult.Failure -> if (settings.speakReplies && voice.available) voice.speak(r.message) {}
+                is ActionResult.Confirm -> {}
+            }
+        }
     }
 
     private fun runCommand(text: String) {
@@ -454,6 +492,16 @@ class AssistantController(private val context: Context, val settings: Settings) 
             if (reply != null) {
                 remember(text, reply)
                 respond(text, reply)
+                return
+            }
+        }
+        // AI chat is off: look it up on the web instead (quick, no key needed).
+        if (!brain.configured() && text.trim().split(Regex("\\s+")).size >= 2) {
+            transition(AssistantState.THINKING, "Searching the web…", text)
+            val web = com.demon.cmfassistant.action.WebInfo.answer(text)
+            if (web != null) {
+                remember(text, web)
+                respond(text, web)
                 return
             }
         }
