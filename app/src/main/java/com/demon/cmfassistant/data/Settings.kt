@@ -131,6 +131,7 @@ class Settings(context: Context) {
     /** Package names of the apps used for "play a song" / "play a video" when no app is named. Empty = none chosen. */
     /** "auto" uses Shizuku or root when available, "off" never does, "shizuku" / "root" force one. */
     var privMode by mutableStateOf(sp.getString("priv_mode", "auto") ?: "auto")
+        private set
     var musicApp by mutableStateOf(sp.getString("music_app", "") ?: "")
         private set
     var videoApp by mutableStateOf(sp.getString("video_app", "") ?: "")
@@ -273,8 +274,11 @@ class Settings(context: Context) {
     @JvmName("applyStayOpen")
     fun setStayOpen(v: Boolean) { stayOpen = v; sp.edit().putBoolean("stay_open", v).apply() }
     @JvmName("applyMusicApp")
+    @JvmName("applyPrivMode")
     fun setPrivMode(v: String) { privMode = v; sp.edit().putString("priv_mode", v).apply() }
+    @JvmName("applyMusicApp")
     fun setMusicApp(v: String) { musicApp = v; sp.edit().putString("music_app", v).apply() }
+    @JvmName("applyVideoApp")
     @JvmName("applyVideoApp")
     fun setVideoApp(v: String) { videoApp = v; sp.edit().putString("video_app", v).apply() }
     @JvmName("applyFollowUp")
