@@ -87,7 +87,7 @@ object VoiceCatalog {
         VoiceModel(
             id = "piper-zani",
             name = "ZANI (YOUR VOICE)",
-            blurb = "Your own trained Piper voice. Fast and light, English. Downloads your two voice files from Google Drive plus a small pronunciation pack.",
+            blurb = "Your own trained Piper voice. Fast and light, English. Downloads your two voice files from your GitHub repo plus a small pronunciation pack.",
             sizeLabel = "small",
             url = BASE + "espeak-ng-data.tar.bz2",
             folder = "piper-zani",
@@ -96,8 +96,8 @@ object VoiceCatalog {
             voices = listOf("Zani" to 0),
             defaultSid = 0,
             extras = listOf(
-                "https://drive.usercontent.google.com/download?id=1oQLEqTjFXIVTslK5t2Q-_Ln0RMQCD7Q9&export=download&confirm=t" to "zani.onnx",
-                "https://drive.usercontent.google.com/download?id=1KhRNWRsMxTGlBmdzZwKtooog0YIcf1pp&export=download&confirm=t" to "zani.onnx.json"
+                "https://raw.githubusercontent.com/MohitEvil/Zani_Voice_model/main/zani.onnx" to "zani.onnx",
+                "https://raw.githubusercontent.com/MohitEvil/Zani_Voice_model/main/zani.onnx.json" to "zani.onnx.json"
             )
         )
     )

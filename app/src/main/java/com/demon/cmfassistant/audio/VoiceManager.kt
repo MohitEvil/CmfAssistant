@@ -99,7 +99,7 @@ class VoiceManager(context: Context) {
         conn.instanceFollowRedirects = true
         try {
             if (conn.responseCode !in 200..299) throw IOException("The server answered ${conn.responseCode}.")
-            if (conn.contentType?.startsWith("text/html") == true) throw IOException("The link gave a web page instead of the file. If it's a Google Drive link, set sharing to \"Anyone with the link\".")
+            if (conn.contentType?.startsWith("text/html") == true) throw IOException("The link gave a web page instead of the file. Check that the link is public and points to the raw file.")
             val total = conn.contentLengthLong
             AppLog.d("download", "server answered ${conn.responseCode}, size ${total / 1024} KB")
             var done = 0L
