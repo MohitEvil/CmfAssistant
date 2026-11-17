@@ -13,3 +13,7 @@
 # The native engine calls the audio callback by method name, so it must keep its exact shape.
 -keep class com.demon.cmfassistant.audio.SamplesCallback { *; }
 -keep class kotlin.jvm.functions.Function1 { *; }
+-keep class rikka.shizuku.** { *; }
+-dontwarn rikka.shizuku.**
+-keep class moe.shizuku.** { *; }
+-dontwarn moe.shizuku.**

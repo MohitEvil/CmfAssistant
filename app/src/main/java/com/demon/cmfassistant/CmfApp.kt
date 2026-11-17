@@ -14,6 +14,7 @@ class CmfApp : Application() {
         super.onCreate()
         com.demon.cmfassistant.debug.AppLog.init(this)
         settings = Settings(this)
+        com.demon.cmfassistant.priv.Priv.preference = { settings.privMode }
         controller = AssistantController(this, settings)
     }
 }

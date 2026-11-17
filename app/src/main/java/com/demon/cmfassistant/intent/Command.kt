@@ -189,6 +189,20 @@ sealed class Command {
         override fun describe() = "Checking scheduled tasks…"
     }
 
+    /**
+     * Deep system controls. [op]: LOC_AUDIT, REVOKE_LOC (a = app), STORAGE, CLEAR_CACHE_ALL, CLEAR_DATA (a = app),
+     * ANIMATIONS (a = on/off), KILL_ALL, REBOOT, SHELL (a = command), TAP (a = "x,y"). [b] = "ok" once the user confirmed.
+     * Needs Shizuku or root for some; the rest works without.
+     */
+    data class Priv(val op: String, val a: String = "", val b: String = "") : Command() {
+        override fun describe() = "Working on the system…"
+    }
+
+    /** A multi-step job in other apps (order food, book a ride, make a reservation) that stops before paying. */
+    data class Task(val goal: String) : Command(), Screen {
+        override fun describe() = "Working through that in the app…"
+    }
+
     data class Weather(val place: String?, val tomorrow: Boolean = false) : Command() {
         override fun describe() = "Checking the weather…"
     }

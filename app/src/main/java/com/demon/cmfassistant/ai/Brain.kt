@@ -30,19 +30,19 @@ class Brain(private val settings: Settings) {
     fun configured(): Boolean = settings.aiEnabled && settings.providers.any { it.ready }
 
     /** Tries each ready provider in order and uses the first that answers. */
-    suspend fun ask(history: List<Turn>, userText: String): Result<String> {
+    suspend fun ask(history: List<Turn>, userText: String, system: String? = null): Result<String> {
         var last: Result<String> = Result.failure(BrainException("No AI provider is set up."))
         for (p in settings.providers.toList().filter { it.ready }) {
-            val r = askOne(p, history, userText)
+            val r = askOne(p, history, userText, system)
             if (r.isSuccess) return r
             last = r
         }
         return last
     }
 
-    suspend fun askOne(p: Provider, history: List<Turn>, userText: String): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun askOne(p: Provider, history: List<Turn>, userText: String, system: String? = null): Result<String> = withContext(Dispatchers.IO) {
         try {
-            Result.success(call(p, history, userText))
+            Result.success(call(p, history, userText, system))
         } catch (e: CancellationException) {
             throw e
         } catch (e: BrainException) {
@@ -111,11 +111,11 @@ class Brain(private val settings: Settings) {
         }
     }
 
-    private fun call(p: Provider, history: List<Turn>, userText: String): String {
+    private fun call(p: Provider, history: List<Turn>, userText: String, systemOverride: String? = null): String {
         val base = p.baseUrl.trim().trimEnd('/')
         val anthropic = p.id == "anthropic" || base.contains("anthropic.com")
         val thinking = settings.aiThinking
-        val system = systemPrompt()
+        val system = systemOverride ?: systemPrompt()
 
         val messages = JSONArray()
         if (!anthropic) messages.put(msg("system", system))

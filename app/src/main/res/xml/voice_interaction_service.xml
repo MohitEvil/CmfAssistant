@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="com.demon.cmfassistant.voice.CmfSessionService"
+    android:recognitionService="com.demon.cmfassistant.voice.CmfRecognitionService"
+    android:settingsActivity="com.demon.cmfassistant.MainActivity"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="true"
+    android:supportsLocalInteraction="false" />

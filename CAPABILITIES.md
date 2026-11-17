@@ -117,3 +117,17 @@ Limits: Accessibility must be enabled manually (Access screen); switch labels va
 ## News & web answers
 - "Any new news?", "latest news about cricket", "news briefing" → ~10 different headlines.
 - With AI chat off, other questions are answered from the web (DuckDuckGo / Wikipedia).
+
+## Tool calling (Needle 3) and cross-app jobs
+- Sentences the fixed grammar doesn't know go to tool calling: Needle 3 on the phone (when the GitHub build downloaded it), else your AI provider. Several tool calls become one chain across apps.
+- "Order biryani from Swiggy", "book a cab to the airport", "book a table at Barbeque Nation": opens the app, searches, picks the first match and stops before paying.
+- Open-ended jobs ("do this in the apps: …") use your AI provider to read the screen and tap step by step. It always asks before anything that pays or confirms.
+
+## Advanced access (optional)
+- Settings → Advanced access: Auto / Off / Shizuku / Root. Used only when granted; otherwise everything falls back.
+- With it: instant Wi-Fi / data / Bluetooth / airplane / NFC / location / dark mode switches, force stop and clear caches without opening Settings, "clear data of X" (asks first), "revoke location from X", "turn off animations", "close background apps", "restart the phone", "run command …" (asks first).
+- Without it: "audit location permissions", "how much storage is left", "do not disturb until 7 am / for 2 hours" still work.
+
+## Assistant trigger
+- The app is registered as a digital assistant, so the power-button / corner-swipe gesture opens the small panel and listens. Choose CMF Assistant under Settings → Apps → Default apps → Digital assistant app.
+- Starting a song or video stops listening and closes the panel.

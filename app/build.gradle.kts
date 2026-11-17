@@ -40,6 +40,14 @@ android {
     buildFeatures {
         compose = true
     }
+    // Needle 3 (Cactus engine). Only built when scripts/fetch-needle.sh downloaded the engine and the build is asked for it.
+    if (project.findProperty("withNeedle") == "true" && file("src/main/cpp/libs/libcactus.a").exists()) {
+        externalNativeBuild {
+            cmake {
+                path = file("src/main/cpp/CMakeLists.txt")
+            }
+        }
+    }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
@@ -60,4 +68,7 @@ dependencies {
     implementation("org.apache.commons:commons-compress:1.27.1")
     // On-device text recognition for screens that expose no text to accessibility (games, images, some web views).
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    // Optional Shizuku support (used only when the user has Shizuku running and grants it).
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
 }

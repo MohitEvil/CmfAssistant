@@ -68,6 +68,10 @@ class ActionEngine(context: Context) {
     private val ui = UiControl(app)
     private val smart = SmartUi(ui, app)
     private val notify = NotifyActions(app)
+    /** Set by the controller so open-ended jobs can ask the user's AI provider. */
+    var brainProvider: () -> com.demon.cmfassistant.ai.Brain? = { null }
+    private val agent by lazy { com.demon.cmfassistant.agent.ScreenAgent({ c -> runSuspendInner(c) }, { brainProvider() }) }
+    private val priv = com.demon.cmfassistant.priv.PrivActions(app, { n -> (findApp(n) ?: findApp(n, fuzzy = true))?.let { it.pkg to it.label } }, { i -> launch(i) })
     private val nav = NavActions(app, { n -> (findApp(n) ?: findApp(n, fuzzy = true))?.pkg }, { i -> launch(i) })
 
     /** Package names of the default music / video apps chosen in Settings (empty = none). */
@@ -113,6 +117,8 @@ class ActionEngine(context: Context) {
         is Command.UiX -> smart.run(cmd)
         is Command.Weather -> Weather.now(cmd.place, cmd.tomorrow)
         is Command.Nav -> nav.run(cmd)
+        is Command.Priv -> priv.run(cmd)
+        is Command.Task -> agent.run(cmd.goal)
         is Command.News -> ActionResult.Success(WebInfo.news(cmd.topic))
         is Command.Say -> ActionResult.Success(cmd.text)
         is Command.KeepAwake -> keepAwake(cmd.minutes)
@@ -124,7 +130,7 @@ class ActionEngine(context: Context) {
         is Command.PlayIn -> playIn(cmd)
         is Command.InstallApp -> smart.installApp(cmd.name)
         is Command.Notif -> notify.run(cmd)
-        is Command.Toggle -> ui.toggle(cmd.key, cmd.on)
+        is Command.Toggle -> (cmd.on?.let { priv.quickToggle(cmd.key, it) }) ?: ui.toggle(cmd.key, cmd.on)
         is Command.SetValue -> ui.setValue(cmd.kind, cmd.value)
         is Command.GlobalAction -> ui.global(cmd.key)
         is Command.UiTap -> smart.tap(cmd.label, cmd.kind)
@@ -182,7 +188,7 @@ class ActionEngine(context: Context) {
     }
 
     /** True for commands that take a moment because they drive another screen. */
-    fun isSlow(cmd: Command): Boolean = cmd is Command.Screen || cmd is Command.Weather || cmd is Command.News || cmd is Command.Nav || cmd is Command.AppSearch || cmd is Command.SmartSearch || cmd is Command.PlayIn || cmd is Command.InstallApp || cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.GlobalAction ||
+    fun isSlow(cmd: Command): Boolean = cmd is Command.Screen || cmd is Command.Weather || cmd is Command.Priv || cmd is Command.Task || cmd is Command.News || cmd is Command.Nav || cmd is Command.AppSearch || cmd is Command.SmartSearch || cmd is Command.PlayIn || cmd is Command.InstallApp || cmd is Command.Toggle || cmd is Command.SetValue || cmd is Command.GlobalAction ||
         cmd is Command.UiTap || cmd is Command.UiFind || cmd is Command.UiType || cmd is Command.UiScroll || cmd === Command.ReadScreen ||
         (cmd is Command.AppAction && (cmd.op == AppOp.FORCE_STOP || cmd.op == AppOp.CLEAR_CACHE))
 
@@ -201,7 +207,7 @@ class ActionEngine(context: Context) {
                 declineMessage = "Okay. I won't touch it."
             )
         }
-        return ui.appTask(c.op, hit.pkg, hit.label)
+        return priv.quickAppTask(c.op.name, hit.pkg, hit.label) ?: ui.appTask(c.op, hit.pkg, hit.label)
     }
 
     fun run(cmd: Command): ActionResult = when (cmd) {
@@ -252,7 +258,7 @@ class ActionEngine(context: Context) {
         is Command.Toggle, is Command.SetValue, is Command.GlobalAction, is Command.UiTap,
         is Command.UiType, is Command.UiScroll, Command.ReadScreen, is Command.UiFind, is Command.UiSwipe, is Command.UiZoom,
         is Command.UiClip, is Command.UiScrollEdge, Command.UiEnter, is Command.UiSearch, is Command.UiSend, is Command.UiMessage,
-        is Command.TakePhoto, is Command.Chain, is Command.UiX, is Command.Weather, is Command.Nav, is Command.News, is Command.Say, is Command.KeepAwake, is Command.AddMacro, is Command.MacroManage, is Command.AskMessage, is Command.Notif, is Command.AppSearch, is Command.SmartSearch, is Command.PlayIn, is Command.InstallApp ->
+        is Command.TakePhoto, is Command.Chain, is Command.UiX, is Command.Weather, is Command.Nav, is Command.Priv, is Command.Task, is Command.News, is Command.Say, is Command.KeepAwake, is Command.AddMacro, is Command.MacroManage, is Command.AskMessage, is Command.Notif, is Command.AppSearch, is Command.SmartSearch, is Command.PlayIn, is Command.InstallApp ->
             ActionResult.Failure("That needs the screen-control service.")
         is Command.Question, is Command.Unknown -> ActionResult.Failure("I don't know how to do that yet.")
     }

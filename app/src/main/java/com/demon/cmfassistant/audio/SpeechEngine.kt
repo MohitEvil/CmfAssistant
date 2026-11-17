@@ -37,14 +37,22 @@ class SpeechEngine(private val context: Context, private val listener: Listener)
     private var recognizer: SpeechRecognizer? = null
     private var generation = 0
 
+    /** A real recognition service. Ours is only a placeholder that lets the system list us as an assistant, so it is never used. */
+    private fun realService(): android.content.ComponentName? {
+        val found = context.packageManager.queryIntentServices(android.content.Intent(android.speech.RecognitionService.SERVICE_INTERFACE), 0)
+            .mapNotNull { it.serviceInfo }.filter { it.packageName != context.packageName }
+        val pick = found.firstOrNull { it.packageName.contains("googlequicksearchbox") } ?: found.firstOrNull() ?: return null
+        return android.content.ComponentName(pick.packageName, pick.name)
+    }
+
     fun start(languageTag: String, preferOffline: Boolean) {
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+        if (!SpeechRecognizer.isRecognitionAvailable(context) && realService() == null) {
             listener.onError(ERROR_UNAVAILABLE)
             return
         }
         val gen = ++generation
         Cue.hushSystemBeep(context)
-        val r = recognizer ?: SpeechRecognizer.createSpeechRecognizer(context).also { recognizer = it }
+        val r = recognizer ?: (realService()?.let { SpeechRecognizer.createSpeechRecognizer(context, it) } ?: SpeechRecognizer.createSpeechRecognizer(context)).also { recognizer = it }
         runCatching { r.cancel() }
         r.setRecognitionListener(object : RecognitionListener {
             private fun live() = gen == generation

@@ -50,10 +50,11 @@ class AssistantController(private val context: Context, val settings: Settings) 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val haptics = HapticController(context, settings)
     val actions = ActionEngine(context)
-        .also { it.musicApp = { settings.musicApp }; it.videoApp = { settings.videoApp } }
+        .also { it.musicApp = { settings.musicApp }; it.videoApp = { settings.videoApp }; it.brainProvider = { brain } }
     /** Offline neural voice, with the device voice as a fallback. Also used by the Voice settings screen. */
     val voice = VoiceHub(context, settings)
     private val brain = Brain(settings)
+    private val planner = com.demon.cmfassistant.agent.Planner(context, brain)
 
     /** True while the window stays open between tasks (the "stay open" setting). */
     private var inSession = false
@@ -409,7 +410,11 @@ class AssistantController(private val context: Context, val settings: Settings) 
         workJob = scope.launch {
             transition(AssistantState.THINKING, "Understanding your request…", text)
             when (val cmd = bestParse(text)) {
-                is Command.Unknown -> chat(text, question = false)
+                is Command.Unknown -> {
+                    // Not in the fixed grammar: let tool calling (Needle 3, or the user's AI) work out the steps.
+                    val planned = runCatching { planner.plan(text) }.getOrNull()
+                    if (planned != null) execute(planned, text) else chat(text, question = false)
+                }
                 is Command.Question -> chat(text, question = true)
                 is Command.SendSms -> prepareSms(cmd, text)
                 else -> execute(cmd, text)
@@ -423,6 +428,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         when (val result = actions.runSuspend(cmd)) {
             is ActionResult.Success -> {
                 val launch = result.launch
+                if (startsPlayback(cmd)) { playAndClose(launch); return }
                 if (launch == null) success(result.message, text, askMore = !opensAnotherApp(cmd))
                 else successLaunching(result.message, text, launch)
             }
@@ -604,6 +610,19 @@ class AssistantController(private val context: Context, val settings: Settings) 
         c is Command.OpenUrl || c is Command.Email || c is Command.AddEvent || c === Command.Wallpaper ||
         c === Command.ShowAlarms || c is Command.OpenApp || c is Command.LaunchPackage || c is Command.PlayMusic ||
         c is Command.UiTap || c is Command.UiFind || c is Command.UiType || c is Command.UiScroll || c is Command.GlobalAction || c === Command.ReadScreen
+
+    /** Starting a song or video: the music is the answer, so stop listening and get out of the way. */
+    private fun startsPlayback(c: Command): Boolean = c is Command.PlayMusic || c is Command.PlayIn || c is Command.UiPlayRandom ||
+        (c is Command.Chain && c.steps.any { startsPlayback(it) })
+
+    private fun playAndClose(launch: (() -> Unit)?) {
+        stopEverything()
+        inSession = false
+        awaitingMore = false
+        haptics.success()
+        launch?.invoke()
+        transition(AssistantState.IDLE, "", "")
+    }
 
     private fun success(message: String, transcript: String, askMore: Boolean = false) {
         val token = ++flow

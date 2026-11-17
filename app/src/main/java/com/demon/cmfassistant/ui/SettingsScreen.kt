@@ -117,6 +117,9 @@ fun SettingsScreen(
         }
 
         Spacer(Modifier.height(16.dp))
+        AdvancedAccessCard(settings, palette)
+
+        Spacer(Modifier.height(16.dp))
         Card(palette) {
             Row(
                 Modifier
@@ -352,4 +355,69 @@ internal fun Field(
             .border(BorderStroke(1.dp, palette.dim), RoundedCornerShape(14.dp))
             .padding(horizontal = 14.dp, vertical = 12.dp)
     )
+}
+
+
+/** Optional Shizuku / root. Off by default behaviour is "auto": used only when it's there and allowed. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun AdvancedAccessCard(settings: Settings, palette: GlyphPalette) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var status by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(com.demon.cmfassistant.priv.Priv.describe(ctx)) }
+    var busy by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val needle = androidx.compose.runtime.remember { com.demon.cmfassistant.agent.NeedleEngine.bundled(ctx) }
+    fun refresh() { status = com.demon.cmfassistant.priv.Priv.describe(ctx) }
+    Card(palette) {
+        Column(Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
+            Text("Advanced access", color = palette.fg, fontSize = 15.sp)
+            Text(
+                "Optional. With Shizuku or root I can switch Wi-Fi and data directly, clear caches, remove permissions and more. Without them everything still works through normal access and screen control.",
+                color = palette.muted, fontSize = 12.sp
+            )
+            Spacer(Modifier.height(12.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                listOf("AUTO" to "auto", "OFF" to "off", "SHIZUKU" to "shizuku", "ROOT" to "root").forEach { (name, mode) ->
+                    Chip(name, settings.privMode == mode, palette) {
+                        settings.setPrivMode(mode)
+                        if (mode == "root" || mode == "auto") scope.launch {
+                            busy = true
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.demon.cmfassistant.priv.Priv.probe() }
+                            busy = false
+                            refresh()
+                        } else refresh()
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(if (busy) "Checking…" else status, color = palette.fg, fontSize = 13.sp)
+            Spacer(Modifier.height(12.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Chip("GRANT SHIZUKU", false, palette) {
+                    if (com.demon.cmfassistant.priv.Priv.shizukuRunning()) com.demon.cmfassistant.priv.Priv.requestShizuku()
+                    else runCatching {
+                        ctx.startActivity(
+                            (ctx.packageManager.getLaunchIntentForPackage("moe.shizuku.privileged.api")
+                                ?: android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://shizuku.rikka.app/download/")))
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }
+                    refresh()
+                }
+                Chip("CHECK AGAIN", false, palette) {
+                    scope.launch {
+                        busy = true
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { com.demon.cmfassistant.priv.Priv.probe() }
+                        busy = false
+                        refresh()
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                if (needle) "Tool calling: Needle 3 (on-device) is included." else "Tool calling: Needle 3 isn't in this build, so your AI provider (if set up) plans multi-step requests.",
+                color = palette.muted, fontSize = 12.sp
+            )
+        }
+    }
 }
