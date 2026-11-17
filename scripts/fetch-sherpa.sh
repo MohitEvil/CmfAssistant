@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Adds the sherpa-onnx library (offline neural voice) to this project.
 # Run once before building, or let the GitHub workflow run it. Needs curl, git and tar with bzip2.
+# Only 1.x versions are used: 2.x removed the built-in espeak phonemizer that Piper voices (Zani) need.
 # It never calls the rate-limited GitHub API: versions come from `git ls-remote`, and a version is only used
 # when its Android archive is really uploaded (a fresh tag can exist for a while before its files do).
 set -u
@@ -9,7 +10,7 @@ cd "$(dirname "$0")/.."
 fail() { echo "::error::$1"; exit 1; }
 
 TAGS=$(git ls-remote --tags --refs https://github.com/k2-fsa/sherpa-onnx 2>/dev/null \
-  | sed 's|.*refs/tags/||' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -Vr | head -8)
+  | sed 's|.*refs/tags/||' | grep -E '^v1\.[0-9]+\.[0-9]+$' | sort -Vr | head -8)
 [ -n "$TAGS" ] || fail "Could not list sherpa-onnx versions."
 
 TMP=$(mktemp -d)
