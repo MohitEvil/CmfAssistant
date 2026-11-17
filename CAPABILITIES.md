@@ -131,3 +131,12 @@ Limits: Accessibility must be enabled manually (Access screen); switch labels va
 ## Assistant trigger
 - The app is registered as a digital assistant, so the power-button / corner-swipe gesture opens the small panel and listens. Choose CMF Assistant under Settings → Apps → Default apps → Digital assistant app.
 - Starting a song or video stops listening and closes the panel.
+
+## Hybrid brain (Nov 18)
+Order for every spoken request: Needle 3 (on the phone) -> your cloud AI (only if switched on; it also sees the recent chat and what is on screen) -> fixed grammar -> plain answer.
+- Needle/cloud can plan several steps: "open Play Store, wait 10 seconds, search Telegram and install it", "turn on the flashlight, wait 10 seconds and turn it off", "take a picture and send it to X on WhatsApp".
+- The grammar handles the same chains offline (wait N seconds, "turn it off", "install it"), and wins over an unsure Needle guess that understood less.
+- Chat history is saved on the phone (45 min of context for follow-ups). Say "clear chat history" to wipe it.
+- Calls: direct with Phone permission, else through Shizuku/root, else the dialer + auto-press Call.
+- Web answers: follow-up aware ("and its value?"), ranks Wikipedia, DuckDuckGo and Bing snippets by your key words and numbers.
+- On-screen matching: closest match is used directly (no "did you mean?" dead end); "change it to X" picks X on the open list.

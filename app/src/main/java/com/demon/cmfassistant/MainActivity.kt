@@ -155,8 +155,13 @@ class MainActivity : ComponentActivity() {
 
         // Contacts permission is requested lazily, the first time a command fails because of it.
         LaunchedEffect(ui.status) {
-            if (ui.state == AssistantState.FAILURE && ui.status.startsWith("Allow Contacts")) {
-                contactsLauncher.launch(Manifest.permission.READ_CONTACTS)
+            if (ui.state == AssistantState.FAILURE) {
+                when {
+                    ui.status.startsWith("Allow Contacts") -> contactsLauncher.launch(Manifest.permission.READ_CONTACTS)
+                    ui.status.startsWith("Allow Phone") -> contactsLauncher.launch(Manifest.permission.CALL_PHONE)
+                    ui.status.startsWith("Allow Photos") -> contactsLauncher.launch(
+                        if (android.os.Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_IMAGES else Manifest.permission.READ_EXTERNAL_STORAGE)
+                }
             }
         }
 

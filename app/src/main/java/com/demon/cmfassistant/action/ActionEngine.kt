@@ -19,6 +19,7 @@ import android.provider.MediaStore
 import android.provider.Settings
 import android.view.KeyEvent
 import androidx.core.content.ContextCompat
+import com.demon.cmfassistant.access.CmfAccess
 import com.demon.cmfassistant.intent.AppOp
 import com.demon.cmfassistant.intent.Command
 import com.demon.cmfassistant.intent.MediaKey
@@ -29,6 +30,7 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 sealed interface ActionResult {
     /** [launch], when set, still has to run: the caller starts it as the spoken reply begins, so voice and action line up. */
@@ -72,6 +74,7 @@ class ActionEngine(context: Context) {
     var brainProvider: () -> com.demon.cmfassistant.ai.Brain? = { null }
     private val agent by lazy { com.demon.cmfassistant.agent.ScreenAgent({ c -> runSuspendInner(c) }, { brainProvider() }) }
     private val priv = com.demon.cmfassistant.priv.PrivActions(app, { n -> (findApp(n) ?: findApp(n, fuzzy = true))?.let { it.pkg to it.label } }, { i -> launch(i) })
+    private val share = ShareActions(app, { n -> (findApp(n) ?: findApp(n, fuzzy = true))?.let { it.pkg to it.label } }, { i -> launch(i) }, ui, smart)
     private val nav = NavActions(app, { n -> (findApp(n) ?: findApp(n, fuzzy = true))?.pkg }, { i -> launch(i) })
 
     /** Package names of the default music / video apps chosen in Settings (empty = none). */
@@ -107,7 +110,7 @@ class ActionEngine(context: Context) {
     suspend fun runSuspend(cmd: Command): ActionResult {
         val r = runSuspendInner(cmd)
         if (r is ActionResult.Success && cmd is Command.Screen && cmd !is Command.UiRepeat && cmd !is Command.GlobalAction &&
-            cmd !is Command.UiFind && cmd !== Command.ReadScreen && cmd !is Command.Chain
+            cmd !is Command.UiFind && cmd !== Command.ReadScreen && cmd !is Command.Chain && cmd !is Command.Wait
         ) lastScreen = cmd
         return r
     }
@@ -144,6 +147,9 @@ class ActionEngine(context: Context) {
         is Command.UiMessage -> ui.message(cmd.contact, cmd.body)
         is Command.TakePhoto -> ui.takePhoto(cmd.selfie)
         is Command.Chain -> runChain(cmd)
+        is Command.Wait -> { onProgress?.invoke(cmd.describe()); delay(cmd.seconds * 1000L); ActionResult.Success("") }
+        is Command.SharePhoto -> share.run(cmd)
+        is Command.Call -> placeCall(cmd.target)
         is Command.UiType -> ui.type(cmd.text)
         is Command.UiScroll -> ui.scroll(cmd.forward)
         is Command.UiFind -> smart.find(cmd.label)
@@ -170,7 +176,7 @@ class ActionEngine(context: Context) {
             }
             when (r) {
                 is ActionResult.Success -> {
-                    last = r.message
+                    if (step !is Command.Wait && r.message.isNotBlank()) last = r.message
                     r.launch?.let { go ->
                         val before = ui.frontPackage()
                         go()
@@ -217,7 +223,7 @@ class ActionEngine(context: Context) {
         is Command.LaunchPackage -> launchPackage(cmd.pkg, cmd.label)
         is Command.SetTimer -> setTimer(cmd.seconds)
         is Command.SetAlarm -> setAlarm(cmd.hour, cmd.minute)
-        is Command.Call -> call(cmd.target)
+        is Command.Call -> ActionResult.Failure("Calling needs the full engine.")
         is Command.ComposeSms -> composeSms(cmd)
         is Command.SendSms -> ActionResult.Failure("That message needs your confirmation first.")
         is Command.Volume -> if (cmd.stream == com.demon.cmfassistant.intent.VolStream.MEDIA) volume(cmd) else system.streamVolume(cmd)
@@ -258,7 +264,7 @@ class ActionEngine(context: Context) {
         is Command.Toggle, is Command.SetValue, is Command.GlobalAction, is Command.UiTap,
         is Command.UiType, is Command.UiScroll, Command.ReadScreen, is Command.UiFind, is Command.UiSwipe, is Command.UiZoom,
         is Command.UiClip, is Command.UiScrollEdge, Command.UiEnter, is Command.UiSearch, is Command.UiSend, is Command.UiMessage,
-        is Command.TakePhoto, is Command.Chain, is Command.UiX, is Command.Weather, is Command.Nav, is Command.Priv, is Command.Task, is Command.News, is Command.Say, is Command.KeepAwake, is Command.AddMacro, is Command.MacroManage, is Command.AskMessage, is Command.Notif, is Command.AppSearch, is Command.SmartSearch, is Command.PlayIn, is Command.InstallApp ->
+        is Command.TakePhoto, is Command.Chain, is Command.Wait, is Command.SharePhoto, is Command.UiX, is Command.Weather, is Command.Nav, is Command.Priv, is Command.Task, is Command.News, is Command.Say, is Command.KeepAwake, is Command.AddMacro, is Command.MacroManage, is Command.AskMessage, is Command.Notif, is Command.AppSearch, is Command.SmartSearch, is Command.PlayIn, is Command.InstallApp ->
             ActionResult.Failure("That needs the screen-control service.")
         is Command.Question, is Command.Unknown -> ActionResult.Failure("I don't know how to do that yet.")
     }
@@ -536,6 +542,9 @@ class ActionEngine(context: Context) {
 
         // 4) A similar-sounding app. Ask before opening it.
         findApp(cleaned, fuzzy = true)?.let { close ->
+            // Opening an app is harmless: when the match is clearly the closest, just open it.
+            val sim = Fuzzy.similarity(CmfAccess.norm(cleaned).replace(" ", ""), CmfAccess.norm(close.label).replace(" ", ""))
+            if (sim >= 0.7) return launchHit(close)
             return ActionResult.Confirm(
                 title = "Open ${close.label}?",
                 detail = "I couldn't find “$name”. Closest match is ${close.label}.",
@@ -645,22 +654,42 @@ class ActionEngine(context: Context) {
         return if (launch(intent)) ActionResult.Success(pick("Alarm set for $label.", "Done. I'll wake you at $label.", "Okay, $label it is.")) else ActionResult.Failure("No clock app can set alarms")
     }
 
-    private fun call(target: String): ActionResult {
-        return when (val r = findContact(target)) {
-            is ContactLookup.Found -> {
-                val intent = Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", r.contact.number, null))
-                if (launch(intent)) ActionResult.Success(pick("Calling ${r.contact.name}.", "Dialing ${r.contact.name}.")) else ActionResult.Failure("No dialer found")
+    private fun hasCallPermission() = ContextCompat.checkSelfPermission(app, android.Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED
+
+    /** Really places the call: directly with Phone permission, else through Shizuku/root, else dials and taps Call on the screen. */
+    private suspend fun placeCall(target: String): ActionResult {
+        val clean = target.trim()
+        val digits = clean.replace(Regex("[\\s-]"), "")
+        val number: String
+        val name: String
+        if (digits.matches(Regex("^\\+?\\d{3,15}$"))) { number = digits; name = digits } else {
+            when (val r = findContact(clean)) {
+                is ContactLookup.Found -> { number = r.contact.number; name = r.contact.name }
+                is ContactLookup.Fuzzy -> return ActionResult.Confirm(
+                    title = "Call ${r.contact.name}?",
+                    detail = "I couldn't find “$target”. Closest match is ${r.contact.name}.",
+                    spoken = "Do you mean ${r.contact.name}?",
+                    command = Command.Call(r.contact.name),
+                    declineMessage = "Okay. I won't call anyone."
+                )
+                ContactLookup.NoPermission -> return ActionResult.Failure("Allow Contacts access to call by name")
+                ContactLookup.NotFound -> return ActionResult.Failure("I couldn't find “$target” in your contacts")
             }
-            is ContactLookup.Fuzzy -> ActionResult.Confirm(
-                title = "Call ${r.contact.name}?",
-                detail = "I couldn't find “$target”. Closest match is ${r.contact.name}.",
-                spoken = "Do you mean ${r.contact.name}?",
-                command = Command.Call(r.contact.name),
-                declineMessage = "Okay. I won't call anyone."
-            )
-            ContactLookup.NoPermission -> ActionResult.Failure("Allow Contacts access to call by name")
-            ContactLookup.NotFound -> ActionResult.Failure("I couldn't find “$target” in your contacts")
         }
+        val uri = Uri.fromParts("tel", number, null)
+        if (hasCallPermission()) {
+            return if (launch(Intent(Intent.ACTION_CALL, uri))) ActionResult.Success(pick("Calling $name.", "Dialing $name.")) else ActionResult.Failure("No phone app found")
+        }
+        if (priv.shell("am start -a android.intent.action.CALL -d tel:" + Uri.encode(number))) return ActionResult.Success("Calling $name.")
+        // No permission: open the dialer, then press the green button for you.
+        val before = ui.frontPackage()
+        if (!launch(Intent(Intent.ACTION_DIAL, uri))) return ActionResult.Failure("No dialer found")
+        val svc = com.demon.cmfassistant.access.CmfAccess.instance
+            ?: return ActionResult.Success("The number for $name is in the dialer. Allow Phone access in Settings and I'll call directly.")
+        ui.settleAfterLaunch(before)
+        val btn = svc.waitFind(listOf("Call", "Dial", "Voice call", "Make call", "Call $name"), 2500)
+        return if (btn != null && svc.click(btn)) ActionResult.Success("Calling $name.")
+        else ActionResult.Failure("Allow Phone access so I can place calls myself. For now, the number for $name is ready in the dialer.")
     }
 
     private fun composeSms(c: Command.ComposeSms): ActionResult {

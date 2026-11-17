@@ -63,6 +63,7 @@ object IntentEngine {
         // A notification reply being dictated is never split into steps
         if (NotifyState.active()) HelperPhrases.parse(s, l)?.let { return it }
 
+        WaitPhrases.parse(s)?.let { return it }
         PrivPhrases.parse(s)?.let { return it }
         MacroPhrases.parse(s)?.let { return it }
 

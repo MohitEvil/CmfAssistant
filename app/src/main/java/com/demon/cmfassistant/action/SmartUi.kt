@@ -26,7 +26,7 @@ class SmartUi(private val ui: UiControl, context: Context) {
     private sealed class Loc {
         class One(val c: CmfAccess.Cand) : Loc()
         class Many(val list: List<CmfAccess.Cand>) : Loc()
-        class Weak(val label: String) : Loc()
+        class Weak(val label: String, val cand: CmfAccess.Cand, val score: Int, val margin: Int) : Loc()
         object None : Loc()
     }
 
@@ -116,7 +116,11 @@ class SmartUi(private val ui: UiControl, context: Context) {
             is Loc.Many -> ask(svc, loc.list, c, name.ifBlank { target }, -1)
             is Loc.Weak ->
                 if (c.act == ScreenAct.ASK) ActionResult.Success("I can't see “$name” exactly, but I can see “${loc.label}”. Say tap it if that's what you mean.")
-                else ActionResult.Confirm(
+                else if (c.act != ScreenAct.DELETE && (loc.score >= 72 || loc.margin >= 15)) {
+                    // A clear closest match: just do it. Asking "did you mean?" and then not acting is the worst of both.
+                    val r = act(svc, loc.cand, c.act)
+                    if (r is ActionResult.Success) ActionResult.Success("I couldn't see “$name” exactly, so I used “${loc.label}”. " + r.message) else r
+                } else ActionResult.Confirm(
                     title = "${verb(c.act).replaceFirstChar { it.uppercase() }} “${loc.label}”?",
                     detail = "I couldn't find “$name” exactly. The closest is “${loc.label}”.",
                     spoken = "I can't see “$name” exactly. Do you mean “${loc.label}”?",
@@ -205,7 +209,9 @@ class SmartUi(private val ui: UiControl, context: Context) {
         val w = dm.widthPixels
         val h = dm.heightPixels
         var bestLabel: String? = null
+        var bestCand: CmfAccess.Cand? = null
         var bestScore = 0
+        var secondScore = 0
 
         fun choose(pool: List<CmfAccess.Cand>): Loc {
             val ordered = Targeting.reading(pool.distinctBy { it.hit.flattenToString() })
@@ -241,7 +247,10 @@ class SmartUi(private val ui: UiControl, context: Context) {
             }
             val exact = scored.filter { it.second >= 96 }.map { it.first }
             if (exact.isNotEmpty()) return choose(exact)
-            for ((cand, s) in scored) if (s > bestScore) { bestScore = s; bestLabel = cand.label }
+            for ((cand, s) in scored) {
+                if (s > bestScore) { secondScore = if (bestCand != null && bestCand!!.label.equals(cand.label, true)) secondScore else bestScore; bestScore = s; bestLabel = cand.label; bestCand = cand }
+                else if (s > secondScore && !cand.label.equals(bestLabel, true)) secondScore = s
+            }
             return null
         }
 
@@ -259,7 +268,8 @@ class SmartUi(private val ui: UiControl, context: Context) {
             }
         }
         val l = bestLabel
-        return if (l != null && bestScore >= Targeting.WEAK) Loc.Weak(l) else Loc.None
+        val bc = bestCand
+        return if (l != null && bc != null && bestScore >= Targeting.WEAK) Loc.Weak(l, bc, bestScore, bestScore - secondScore) else Loc.None
     }
 
     private fun rowLabel(all: List<CmfAccess.Cand>, c: CmfAccess.Cand): String {
@@ -361,14 +371,20 @@ class SmartUi(private val ui: UiControl, context: Context) {
                 toggleCand(svc, row ?: loc.c, c.on, loc.c.label)
             }
             is Loc.Many -> ask(svc, loc.list, Command.UiSmart(label), label, sw)
-            is Loc.Weak -> ActionResult.Confirm(
-                title = "Switch “${loc.label}”?",
-                detail = "I couldn't find “$q” exactly. The closest is “${loc.label}”.",
-                spoken = "I can't see “$q” exactly. Do you mean “${loc.label}”?",
-                command = Command.UiSwitch(loc.label, c.on),
-                declineMessage = "Okay, I won't touch it.",
-                declineAsFailure = false
-            )
+            is Loc.Weak -> {
+                val now = svc.candidates()
+                val row = now.filter { it.checkable }.filter { abs(it.rect.centerY() - loc.cand.rect.centerY()) < max(loc.cand.hit.height(), 60) * 0.6 }
+                    .minByOrNull { abs(it.rect.centerX() - loc.cand.rect.centerX()) }
+                if (row != null || loc.cand.checkable) toggleCand(svc, row ?: loc.cand, c.on, loc.label)
+                else ActionResult.Confirm(
+                    title = "Switch “${loc.label}”?",
+                    detail = "I couldn't find “$q” exactly. The closest is “${loc.label}”.",
+                    spoken = "I can't see “$q” exactly. Do you mean “${loc.label}”?",
+                    command = Command.UiSwitch(loc.label, c.on),
+                    declineMessage = "Okay, I won't touch it.",
+                    declineAsFailure = false
+                )
+            }
             Loc.None -> ActionResult.Failure("I can't see a switch for “$q” on this screen.")
         }
     }

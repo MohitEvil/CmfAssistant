@@ -322,6 +322,16 @@ sealed class Command {
         override fun describe() = "Working on it…"
     }
 
+    /** "Wait 10 seconds": pauses a chain (capped at five minutes). */
+    data class Wait(val seconds: Int) : Command(), Screen {
+        override fun describe() = "Waiting $seconds seconds…"
+    }
+
+    /** Sends the newest photo to [contact] through [app] (or the share sheet when no app is named). */
+    data class SharePhoto(val contact: String, val app: String?) : Command(), Screen {
+        override fun describe() = "Sending the photo…"
+    }
+
     data class UiType(val text: String) : Command(), Screen {
         override fun describe() = "Typing…"
     }

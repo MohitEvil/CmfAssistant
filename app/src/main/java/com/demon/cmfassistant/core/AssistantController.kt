@@ -19,6 +19,7 @@ import com.demon.cmfassistant.audio.NeuralVoice
 import com.demon.cmfassistant.audio.VoiceCatalog
 import com.demon.cmfassistant.audio.VoiceHub
 import com.demon.cmfassistant.data.Settings
+import com.demon.cmfassistant.debug.AppLog
 import com.demon.cmfassistant.feedback.HapticController
 import com.demon.cmfassistant.intent.Affirmation
 import com.demon.cmfassistant.intent.Command
@@ -84,7 +85,9 @@ class AssistantController(private val context: Context, val settings: Settings) 
     /** True right after "anything else?", so a bare yes / no / stop is read as an answer to it. */
     private var awaitingMore = false
 
-    private val history = ArrayList<Turn>()
+    /** Saved on the phone: survives restarts, so follow-ups keep their context. */
+    private val history = com.demon.cmfassistant.ai.ChatHistory(context)
+    private var confirmTries = 0
 
     private val speech: SpeechEngine = SpeechEngine(context, object : SpeechEngine.Listener {
         override fun onPartial(text: String) {
@@ -103,7 +106,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
             when (mode) {
                 Mode.COMMAND -> if (text.isBlank()) noMatch() else heard(text)
                 Mode.FOLLOWUP -> if (text.isBlank()) { if (inSession && sessionBlank++ < 1) beginListening(Mode.FOLLOWUP) else endQuiet() } else { sessionBlank = 0; heard(text) }
-                Mode.CONFIRM -> handleConfirmAnswer(text)
+                Mode.CONFIRM -> if (text.isBlank() && relistenConfirm()) Unit else handleConfirmAnswer(text)
             }
         }
 
@@ -138,7 +141,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
                 Mode.FOLLOWUP -> if (silent) { if (inSession && sessionBlank++ < 1) beginListening(Mode.FOLLOWUP) else endQuiet() } else fail(errorMessage(code))
                 Mode.CONFIRM -> {
                     val pending = _ui.value.pending
-                    if (silent && pending != null) decline(pending) else fail(errorMessage(code))
+                    if (silent && pending != null) { if (!relistenConfirm()) decline(pending) } else fail(errorMessage(code))
                 }
             }
         }
@@ -173,7 +176,6 @@ class AssistantController(private val context: Context, val settings: Settings) 
 
     /** Starts a new request. The recent conversation is kept for two minutes so follow-ups still make sense. */
     fun startListening() {
-        if (SystemClock.uptimeMillis() - lastActive > 120_000) history.clear()
         beginListening(Mode.COMMAND)
     }
 
@@ -403,21 +405,56 @@ class AssistantController(private val context: Context, val settings: Settings) 
         }
     }
 
+    private val chatty = Regex("^(?:hi|hello|hey|yo|thanks|thank you|good (?:morning|night|evening|afternoon)|how are you|how r u|who are you|what'?s your name|tell me a joke|i love you|i'?m (?:sad|bored|tired)|are you there|nice|great|cool|awesome|lol)\\b", RegexOption.IGNORE_CASE)
+    private val forgetChat = Regex("^(?:clear|forget|delete|erase|reset)\\s+(?:our |the |my |all )?(?:chat |conversation |assistant )?(?:history|conversation|chat)$", RegexOption.IGNORE_CASE)
+
+    private fun stepCount(c: Command): Int = if (c is Command.Chain) c.steps.size else 1
+
+    /**
+     * The hybrid brain: Needle 3 (offline) -> cloud AI (if it's on) -> fixed grammar -> a plain answer.
+     * Needle and the cloud can plan several steps, waits included. The grammar is the safety net that always works offline,
+     * and it still wins over a Needle guess that is unsure and does less than the grammar understood.
+     */
+    private suspend fun route(text: String, grammar: Command): Command? {
+        val known = grammar !is Command.Unknown && grammar !is Command.Question
+        if (chatty.containsMatchIn(text.trim()) && !known) return null
+        // 1. Needle 3
+        val n = runCatching { planner.needle(text) }.getOrNull()
+        if (n != null) {
+            val better = !known || n.confidence >= 0.8 || stepCount(n.command) > stepCount(grammar)
+            if (better) { AppLog.d("route", "needle"); return n.command }
+        }
+        // 2. Cloud AI: only when the grammar didn't fully understand, or the request is long or has several steps
+        val long = text.trim().split(Regex("\\s+")).size >= 9
+        if (brain.configured() && (!known || grammar is Command.Chain || long)) {
+            transition(AssistantState.THINKING, "Planning…", text)
+            val c = runCatching { planner.cloud(text, history.recent()) }.getOrNull()
+            if (c != null) { AppLog.d("route", "cloud"); return c.command }
+        }
+        // 3. Fixed grammar
+        if (known) { AppLog.d("route", "grammar"); return grammar }
+        // 4. Nothing planned: the caller answers it as conversation
+        return null
+    }
+
     private fun runCommand(text: String) {
         workJob?.cancel()
         flow++
         lastActive = SystemClock.uptimeMillis()
         workJob = scope.launch {
             transition(AssistantState.THINKING, "Understanding your request…", text)
-            when (val cmd = bestParse(text)) {
-                is Command.Unknown -> {
-                    // Not in the fixed grammar: let tool calling (Needle 3, or the user's AI) work out the steps.
-                    val planned = runCatching { planner.plan(text) }.getOrNull()
-                    if (planned != null) execute(planned, text) else chat(text, question = false)
-                }
-                is Command.Question -> chat(text, question = true)
-                is Command.SendSms -> prepareSms(cmd, text)
-                else -> execute(cmd, text)
+            if (forgetChat.matches(text.trim())) {
+                history.clear()
+                success("Done. I've cleared our chat history.", text)
+                return@launch
+            }
+            val grammar = bestParse(text)
+            if (grammar is Command.Question) { chat(text, question = true); return@launch }
+            val plan = route(text, grammar)
+            when {
+                plan == null -> chat(text, question = false)
+                plan is Command.SendSms -> prepareSms(plan, text)
+                else -> execute(plan, text)
             }
         }
     }
@@ -428,11 +465,12 @@ class AssistantController(private val context: Context, val settings: Settings) 
         when (val result = actions.runSuspend(cmd)) {
             is ActionResult.Success -> {
                 val launch = result.launch
+                history.addPair(text, result.message.ifBlank { "Done." }, "action")
                 if (startsPlayback(cmd)) { playAndClose(launch); return }
                 if (launch == null) success(result.message, text, askMore = !opensAnotherApp(cmd))
                 else successLaunching(result.message, text, launch)
             }
-            is ActionResult.Failure -> fail(result.message, text, session = true)
+            is ActionResult.Failure -> { history.addPair(text, result.message, "action"); fail(result.message, text, session = true) }
             is ActionResult.Confirm -> askConfirm(
                 PendingConfirm(
                     title = result.title,
@@ -494,7 +532,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         }
         if (brain.configured()) {
             transition(AssistantState.THINKING, "Thinking…", text)
-            val reply = brain.ask(history, text).getOrNull()
+            val reply = brain.ask(history.recent(), text).getOrNull()
             if (reply != null) {
                 remember(text, reply)
                 respond(text, reply)
@@ -502,9 +540,9 @@ class AssistantController(private val context: Context, val settings: Settings) 
             }
         }
         // AI chat is off: look it up on the web instead (quick, no key needed).
-        if (!brain.configured() && text.trim().split(Regex("\\s+")).size >= 2) {
+        if (text.trim().split(Regex("\\s+")).size >= 2) {
             transition(AssistantState.THINKING, "Searching the web…", text)
-            val web = com.demon.cmfassistant.action.WebInfo.answer(text)
+            val web = com.demon.cmfassistant.action.WebInfo.answer(text, history.lastChatQuestion())
             if (web != null) {
                 remember(text, web)
                 respond(text, web)
@@ -515,11 +553,7 @@ class AssistantController(private val context: Context, val settings: Settings) 
         respond(text, SmallTalk.fallback(question))
     }
 
-    private fun remember(user: String, reply: String) {
-        history.add(Turn("user", user))
-        history.add(Turn("assistant", reply))
-        while (history.size > 12) history.removeAt(0)
-    }
+    private fun remember(user: String, reply: String) = history.addPair(user, reply, "chat")
 
     /** Shows and speaks an answer, then opens the mic again for a follow-up. */
     private fun respond(text: String, reply: String) {
@@ -553,7 +587,16 @@ class AssistantController(private val context: Context, val settings: Settings) 
 
     // ---- Confirmations ----
 
+    /** A quiet or unclear answer to a question is not a "no": listen again, up to twice, before giving up. */
+    private fun relistenConfirm(): Boolean {
+        if (_ui.value.pending == null || confirmTries >= 2) return false
+        confirmTries++
+        beginListening(Mode.CONFIRM)
+        return true
+    }
+
     private fun askConfirm(pending: PendingConfirm, text: String) {
+        confirmTries = 0
         val token = ++flow
         transition(AssistantState.CONFIRMING, "", text, pending = pending)
         haptics.lightTap()
@@ -576,7 +619,8 @@ class AssistantController(private val context: Context, val settings: Settings) 
             Affirmation.Answer.OTHER -> {
                 // Maybe they just gave a new command ("open YouTube"). Otherwise treat it as not agreeing.
                 val c = IntentEngine.parse(text)
-                if (c !is Command.Unknown && c !is Command.Question) process(text) else decline(pending)
+                if (c !is Command.Unknown && c !is Command.Question) process(text)
+                else if (!relistenConfirm()) decline(pending)
             }
         }
     }

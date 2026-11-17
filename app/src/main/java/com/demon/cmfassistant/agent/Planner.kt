@@ -1,63 +1,61 @@
 package com.demon.cmfassistant.agent
 
 import android.content.Context
+import com.demon.cmfassistant.access.CmfAccess
 import com.demon.cmfassistant.ai.Brain
+import com.demon.cmfassistant.ai.Turn
 import com.demon.cmfassistant.debug.AppLog
 import com.demon.cmfassistant.intent.Command
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
- * Turns a sentence the fixed grammar didn't understand into tool calls. Needle 3 first (instant, offline),
- * then the user's AI provider if one is set up. Several calls become one chain, so cross-app jobs just work.
+ * Turns a sentence into tool calls. The hybrid order is decided by the controller:
+ * Needle 3 (on the phone) -> cloud AI (if switched on) -> fixed grammar -> plain answer. Any plan, from either brain,
+ * can hold several calls (open, wait, search, install...) and runs as one chain.
  */
 class Planner(private val context: Context, private val brain: Brain) {
 
-    private fun commandsFrom(calls: JSONArray?): List<Command> {
-        val out = ArrayList<Command>()
-        if (calls == null) return out
-        for (i in 0 until calls.length()) {
-            val o = calls.optJSONObject(i) ?: continue
-            val args = o.optJSONObject("arguments") ?: JSONObject()
-            Tools.toCommand(o.optString("name"), args)?.let { out.add(it) }
-        }
-        return out
+    class Plan(val command: Command, val confidence: Double, val source: String)
+
+    /** 1. Needle 3: instant and offline. Null when it isn't in this build or isn't sure. */
+    suspend fun needle(text: String): Plan? {
+        if (!NeedleEngine.bundled(context)) return null
+        val r = withContext(Dispatchers.Default) { NeedleEngine.complete(context, text) } ?: return null
+        val conf = r.optDouble("confidence", 1.0).let { if (it.isNaN()) 1.0 else it }
+        val cmd = Tools.toPlan(r.optJSONArray("function_calls"))
+        AppLog.d("needle", "'${text.take(50)}' -> ${cmd?.javaClass?.simpleName} confidence $conf")
+        if (cmd == null || conf < 0.45) return null
+        return Plan(cmd, conf, "needle")
     }
 
-    private fun pack(list: List<Command>): Command? = when {
-        list.isEmpty() -> null
-        list.size == 1 -> list[0]
-        else -> Command.Chain(list)
+    private fun screenContext(): String {
+        val svc = CmfAccess.instance ?: return "Screen control is off."
+        return runCatching {
+            val labels = svc.candidates().map { it.label.trim() }.filter { it.length in 2..40 }.distinct().take(28)
+            "App in front: ${svc.frontPackage()}. Visible on screen: " + labels.joinToString(" | ")
+        }.getOrDefault("")
     }
 
-    suspend fun plan(text: String): Command? {
-        // 1. Needle 3, on the phone.
-        if (NeedleEngine.bundled(context)) {
-            val r = withContext(Dispatchers.Default) { NeedleEngine.complete(context, text) }
-            if (r != null) {
-                val conf = r.optDouble("confidence", 1.0)
-                val cmds = commandsFrom(r.optJSONArray("function_calls"))
-                AppLog.d("needle", "'${text.take(40)}' -> ${cmds.size} calls, confidence $conf")
-                if (cmds.isNotEmpty() && (conf.isNaN() || conf >= 0.35)) return pack(cmds)
-            }
-        }
-        // 2. The user's own AI, asked to pick tools.
-        if (brain.configured() && looksLikeOrder(text)) {
-            val system = "You route a phone assistant's requests to tools. Reply with ONLY JSON: {\"calls\":[{\"name\":\"tool\",\"arguments\":{...}}]}. " +
-                "Use several calls, in order, for multi-step requests. If the user is just chatting or asking a question, reply {\"calls\":[]}.\nTools:\n" + Tools.promptList()
-            val reply = brain.ask(emptyList(), text, system).getOrNull() ?: return null
-            val json = reply.substringAfter('{', "").let { if (it.isEmpty()) null else "{" + it.substringBeforeLast('}') + "}" } ?: return null
-            val cmds = runCatching { commandsFrom(JSONObject(json).optJSONArray("calls")) }.getOrDefault(emptyList())
-            return pack(cmds)
-        }
-        return null
-    }
-
-    private fun looksLikeOrder(t: String): Boolean {
-        val w = t.trim().split(Regex("\\s+"))
-        if (w.size < 3) return false
-        return !Regex("^(?:what|who|why|how|when|where|which|is|are|do|does|did|can you tell|tell me|explain|define)\\b", RegexOption.IGNORE_CASE).containsMatchIn(t.trim())
+    /** 2. The user's own cloud AI, shown the tools, the recent conversation and what is on screen. */
+    suspend fun cloud(text: String, history: List<Turn>): Plan? {
+        if (!brain.configured()) return null
+        val now = SimpleDateFormat("EEE d MMM yyyy, HH:mm", Locale.US).format(Date())
+        val system = "You are the planner of a voice assistant on an Android phone (India). Turn the user's request into tool calls. " +
+            "Reply with ONLY JSON: {\"calls\":[{\"name\":\"tool\",\"arguments\":{...}}]}. " +
+            "Rules: use several calls, in order, for multi-step requests; put a wait call wherever the user says wait; " +
+            "to install or update an app use install_app (one call); to tap something visible use tap_on_screen with its exact on-screen label; " +
+            "use the conversation so far to resolve words like it, that, him, there; " +
+            "if the user is only chatting or asking a question to be answered, reply {\"calls\":[]}. Never invent tools.\n" +
+            "Now: $now.\n${screenContext()}\nTools:\n" + Tools.promptList()
+        val reply = brain.ask(history, text, system).getOrNull() ?: return null
+        val json = reply.substringAfter('{', "").let { if (it.isEmpty()) null else "{" + it.substringBeforeLast('}') + "}" } ?: return null
+        val cmd = runCatching { Tools.toPlan(JSONObject(json).optJSONArray("calls")) }.getOrNull() ?: return null
+        AppLog.d("cloudplan", "'${text.take(50)}' -> ${cmd.javaClass.simpleName}")
+        return Plan(cmd, 0.7, "cloud")
     }
 }

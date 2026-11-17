@@ -10,11 +10,11 @@ object Chain {
 
     private const val VERBS = "open|launch|start|search|find|look|type|write|enter|tap|click|press|hit|scroll|go|send|msg|message|text|sms|" +
         "select|choose|long|hold|double|swipe|turn|switch|set|call|play|take|read|back|home|zoom|copy|paste|close|exit|navigate|google|" +
-        "submit|pinch|drag|pick|check|uncheck|toggle|enable|disable|clear|delete|share|save|add|create|new"
+        "submit|pinch|drag|pick|check|uncheck|toggle|enable|disable|clear|delete|share|save|add|create|new|wait|pause|install|download|update|snap|capture|mute|unmute|lock"
 
-    private val sep = Regex("\\s*(?:,|;|->|→|>)?\\s*\\b(?:and then|and after that|after that|and also|then|and)\\b\\s+(?=(?:$VERBS)\\b)|\\s*(?:->|→|>)\\s*", I)
+    private val sep = Regex("\\s*(?:,|;|->|→|>)?\\s*\\b(?:and then|and after that|after that|afterwards|and also|then|and)\\b[,]?\\s+(?=(?:$VERBS)\\b)|\\s*(?:->|→|>)\\s*|\\s*[,;]\\s*(?=(?:$VERBS)\\b)", I)
     private val messageVerb = Regex("^(?:msg|message|text|sms|send (?:a )?(?:message|text)|whatsapp)\\b", I)
-    private val hint = Regex("\\b(and|then|after that)\\b|->|→|>", I)
+    private val hint = Regex("\\b(and|then|after that|afterwards)\\b|->|→|>|[,;]\\s*(?:$VERBS)\\b", I)
 
     private val leading = Regex("^(?:please|now|just|then|and|also|go ahead and|can you|could you)\\s+", I)
 
@@ -62,11 +62,72 @@ object Chain {
             val c = step(p, hasPrev = i > 0) ?: return null
             steps.add(c)
         }
+        val fixed = resolveIt(steps)
         // A chain of one real step plus fillers isn't a chain.
-        return if (steps.size >= 2) Command.Chain(steps) else null
+        return if (fixed.size >= 2) Command.Chain(fixed) else null
     }
 
+    private val itWords = setOf("it", "that", "this", "them")
+    private val installWords = setOf("install", "update", "download", "get", "install it", "update it", "download it")
+    private val playStore = Regex("play ?store|google play|app ?store", I)
+
+    private fun isInstallTap(c: Command): Boolean = when (c) {
+        is Command.UiTap -> c.label.trim().lowercase() in installWords
+        is Command.UiSmart -> c.act == ScreenAct.TAP && c.target.trim().lowercase() in installWords
+        is Command.InstallApp -> c.name == "@it"
+        else -> false
+    }
+
+    /**
+     * Cleans up a list of steps, whoever wrote it (grammar, Needle 3 or the cloud AI):
+     * "turn it off" after the flashlight means the flashlight, and "search X in Play Store ... install it" becomes one install.
+     */
+    fun normalize(steps: List<Command>): List<Command> {
+        val out = ArrayList<Command>()
+        var last: Command? = null
+        for (c in steps) {
+            if (isInstallTap(c)) {
+                // find what was searched for
+                var q: String? = null
+                var i = out.size - 1
+                while (i >= 0) {
+                    val p = out[i]
+                    val found = when (p) {
+                        is Command.UiSearch -> p.query
+                        is Command.AppSearch -> p.query
+                        is Command.SmartSearch -> p.query
+                        else -> null
+                    }
+                    if (found != null && q == null) q = found
+                    if (p is Command.Wait || p is Command.UiSearch || p is Command.AppSearch || p is Command.SmartSearch || p is Command.UiTap && p.label == "@first" ||
+                        (p is Command.OpenApp && playStore.containsMatchIn(p.name)) || (p is Command.LaunchPackage && p.pkg.contains("vending"))) { out.removeAt(i); i-- } else break
+                }
+                out.add(if (q != null) Command.InstallApp(q) else Command.UiSmart("Install", ScreenAct.TAP))
+                last = out.last()
+                continue
+            }
+            val r: Command = when {
+                c is Command.UiSwitch && c.label.trim().lowercase() in itWords && c.on != null -> when (val l = last) {
+                    is Command.Flashlight -> Command.Flashlight(c.on)
+                    is Command.Toggle -> Command.Toggle(l.key, c.on)
+                    else -> c
+                }
+                else -> c
+            }
+            out.add(r)
+            if (r !is Command.Wait) last = r
+        }
+        return out
+    }
+
+    private fun resolveIt(steps: List<Command>) = normalize(steps)
+
     private fun step(p: String, hasPrev: Boolean): Command? {
+        WaitPhrases.parse(p)?.let { return it }
+        Regex("^(?:turn|switch)\\s+(?:(?:it|that|this)\\s+(on|off)|(on|off)\\s+(?:it|that|this))$", I).find(p)?.let { m ->
+            return Command.UiSwitch("it", (m.groupValues[1].ifEmpty { m.groupValues[2] }).lowercase() == "on")
+        }
+        if (Regex("^(?:install|download|update|get)(?: it| that| this| the app| the application| it too)?$", I).matches(p)) return Command.InstallApp("@it")
         // "message demon hi", "msg 'demon' saying hello"
         Regex("^(?:msg|message|text|sms|send (?:a )?(?:message|text) to|whatsapp)\\s+(?:to\\s+)?(?:[\"'“‘]([^\"'”’]+)[\"'”’]|(\\S+))\\s*(?:saying|that says|says|that|:|,|with)?\\s*(.+)$", I).find(p)?.let { m ->
             val name = m.groupValues[1].ifEmpty { m.groupValues[2] }.trim()

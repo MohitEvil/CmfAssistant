@@ -91,6 +91,20 @@ object Tools {
         Tool("schedule_task", "Run another command later or repeatedly, for example every day at 10 am.", listOf(Arg("command", "string", "What to do, in plain words"), Arg("when", "string", "every day at 10 am, tomorrow at 7, only on Sunday..."))) { a ->
             val c = s(a, "command"); val w = s(a, "when"); if (c != null && w != null) "$c $w" else null
         },
+        Tool("wait", "Pause for some seconds before the next step.", listOf(Arg("seconds", "integer", "Seconds to wait"))) { a ->
+            a.optInt("seconds", 5).takeIf { it > 0 }?.let { "wait $it seconds" }
+        },
+        Tool("install_app", "Install or update an app from the Play Store (opens the Play Store, searches and presses Install).", listOf(Arg("name", "string", "App name"))) { a ->
+            s(a, "name")?.let { "install $it" }
+        },
+        Tool("take_photo", "Take a picture with the camera app.", listOf(Arg("selfie", "boolean", "Use the front camera", false))) { a ->
+            if (a.optBoolean("selfie", false)) "take a selfie" else "take a photo"
+        },
+        Tool("share_last_photo", "Send the newest photo to a person, through an app such as WhatsApp or Telegram.",
+            listOf(Arg("contact", "string", "Person"), Arg("app", "string", "App", false))) { a ->
+            val c = s(a, "contact"); val app = s(a, "app")
+            if (c == null) null else "send the last photo to $c" + (app?.let { " on $it" } ?: "")
+        },
         Tool("do_in_apps", "Complete a longer job across apps by navigating their screens: order food, book a ride, reserve a table. Stops before paying.",
             listOf(Arg("goal", "string", "The whole job in plain words"))) { a -> s(a, "goal")?.let { "do this in the apps: $it" } },
         Tool("system_task", "Deep system job: audit location permissions, free up storage, clear app cache, turn animations off.",
@@ -132,5 +146,18 @@ object Tools {
         val sentence = tool.say(args) ?: return null
         val c = IntentEngine.parse(sentence)
         return if (c is Command.Unknown || c is Command.Question) null else c
+    }
+
+    /** Several tool calls in order -> one command (cleaned up: "turn it off", install chains). */
+    fun toPlan(calls: JSONArray?): Command? {
+        if (calls == null) return null
+        val out = ArrayList<Command>()
+        for (i in 0 until calls.length()) {
+            val o = calls.optJSONObject(i) ?: continue
+            val c = toCommand(o.optString("name"), o.optJSONObject("arguments") ?: o.optJSONObject("args") ?: JSONObject()) ?: return null // one bad step spoils the plan
+            out.add(c)
+        }
+        val fixed = com.demon.cmfassistant.intent.Chain.normalize(out)
+        return when { fixed.isEmpty() -> null; fixed.size == 1 -> fixed[0]; else -> Command.Chain(fixed) }
     }
 }

@@ -8,7 +8,7 @@ object Affirmation {
     private val yes = setOf(
         // English
         "yes", "yeah", "yea", "yep", "yup", "ya", "yah", "sure", "ok", "okay", "okk", "okey", "k", "correct",
-        "right", "exactly", "please", "proceed", "confirm", "ahead", "absolutely", "definitely", "affirmative",
+        "right", "exactly", "yess", "yas", "ye", "es", "yaa", "yeh", "yeap", "please", "proceed", "confirm", "ahead", "absolutely", "definitely", "affirmative",
         // Hinglish
         "haan", "han", "haa", "ha", "hanji", "haanji", "haji", "hnji", "ji", "jee", "theek", "thik", "tik",
         "sahi", "bilkul", "pakka", "kar", "karo", "kardo", "kholo", "khol", "chalo", "chalega", "accha", "acha",
@@ -28,7 +28,7 @@ object Affirmation {
         "नहीं", "नही", "नहि", "मत", "रहने", "छोड़ो", "छोड़", "रुको", "गलत", "कैंसिल", "नो"
     )
 
-    private val yesPhrases = listOf("go ahead", "do it", "open it", "send it", "kar do", "khol do")
+    private val yesPhrases = listOf("go ahead", "do it", "open it", "send it", "kar do", "khol do", "tap it", "click it", "select it", "press it", "that one", "thats it", "that is it", "that is right", "thats right", "i mean", "go for it", "yes please", "of course", "why not", "do that", "same one", "the same")
     private val splitter = Regex("[^\\p{L}\\p{M}\\p{N}]+")
 
     fun classify(raw: String): Answer {

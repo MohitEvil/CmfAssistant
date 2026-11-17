@@ -19,6 +19,9 @@ class PrivActions(
     private val findApp: (String) -> Pair<String, String>?,
     private val launch: (Intent) -> Boolean
 ) {
+    /** Runs one shell command through Shizuku or root. False when neither is available or it failed. */
+    suspend fun shell(cmd: String): Boolean = Priv.available() && Priv.sh(cmd).ok
+
     private val locationPerms = listOf(
         "android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION", "android.permission.ACCESS_BACKGROUND_LOCATION"
     )

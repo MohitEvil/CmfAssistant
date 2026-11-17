@@ -85,6 +85,11 @@ object Targeting {
             if (l.toSet().containsAll(q)) return 70
         }
         if (qs.length >= 4 && ls.contains(qs) && ls.length <= qs.length + 6) return 78
+        if (qs.length >= 6 && ls.contains(qs)) return 72
+        // Every word of the request shows up in the label, allowing small mishearings ("digital assistance" for "Digital assistant app").
+        val cover = q.count { qw -> l.any { lw -> lw == qw || (qw.length >= 4 && (lw.startsWith(qw) || qw.startsWith(lw) && lw.length >= 4 || Fuzzy.similarity(qw, lw) >= 0.8)) } }.toDouble() / q.size
+        if (cover >= 1.0) return if (l.size <= q.size + 3) 86 else 74
+        if (q.size >= 3 && cover >= 0.67) return 64
         val sim = Fuzzy.similarity(qs, ls)
         return when {
             sim >= 0.88 -> 89

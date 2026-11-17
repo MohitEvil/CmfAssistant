@@ -273,12 +273,10 @@ class Settings(context: Context) {
     fun setSpeakReplies(v: Boolean) { speakReplies = v; sp.edit().putBoolean("speak_replies", v).apply() }
     @JvmName("applyStayOpen")
     fun setStayOpen(v: Boolean) { stayOpen = v; sp.edit().putBoolean("stay_open", v).apply() }
-    @JvmName("applyMusicApp")
     @JvmName("applyPrivMode")
     fun setPrivMode(v: String) { privMode = v; sp.edit().putString("priv_mode", v).apply() }
     @JvmName("applyMusicApp")
     fun setMusicApp(v: String) { musicApp = v; sp.edit().putString("music_app", v).apply() }
-    @JvmName("applyVideoApp")
     @JvmName("applyVideoApp")
     fun setVideoApp(v: String) { videoApp = v; sp.edit().putString("video_app", v).apply() }
     @JvmName("applyFollowUp")

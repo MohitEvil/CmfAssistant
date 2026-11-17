@@ -105,6 +105,12 @@ object UiPhrases {
         }
         if (ScreenMemory.last() != null && has(t, "^(?:what(?: is|s)? (?:it|that|this)|tell me (?:more )?about (?:it|that)|describe (?:it|that))$")) return Command.UiSmart("it", ScreenAct.ASK)
 
+        // "change it to cmf assistant", "set it to Wi-Fi only", "switch that to dark": pick the named option on this screen
+        Regex("^(?:change|set|switch|select|choose|pick|make)\\s+(?:it|that|this|the (?:default|current) (?:one|option))\\s+(?:to|as)\\s+(.+)$").find(t)?.let { m ->
+            val x = m.groupValues[1].trim()
+            if (x.isNotEmpty() && x.length < 60) return Command.UiSmart(x, ScreenAct.TAP)
+        }
+
         scroll(t)?.let { return it }
 
         if (has(t, "^(?:hide|close|dismiss|put away|remove)(?: the| my)? keyboard$")) return Command.UiMisc("hidekeyboard")
